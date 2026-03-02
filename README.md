@@ -20,14 +20,14 @@ To run this program locally, you must have the following installed:
 git clone [https://github.com/YOUR_USERNAME/CyberSentinel2026.git](https://github.com/YOUR_USERNAME/CyberSentinel2026.git)
 cd CyberSentinel2026
 
-**2. Install Python dependencies
+**2. Install Python dependencies**
 pip install -r requirements.txt
 
-**3. Initialize the AI Analyst (Ollama)
+**3. Initialize the AI Analyst (Ollama)**
 Ensure the Ollama desktop app is running in the background, then pull the required model:
 ollama run llama3:8b
 
-(Note: If the models/ directory is not included in this repository due to size limits, please download the EMBER2024 models from [HERE](https://drive.google.com/drive/folders/1dtVVH4Oo5RhoAiMPhqsB4T1X2dGX0v5N?usp=drive_link) and place it in the root directory).
+*(Note: If the models/ directory is not included in this repository due to size limits, please download the EMBER2024 models from [HERE](https://drive.google.com/drive/folders/1dtVVH4Oo5RhoAiMPhqsB4T1X2dGX0v5N?usp=drive_link) and place it in the root directory).*
 
 ## 💻 Usage
 Run the main interface from your terminal:
