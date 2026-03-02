@@ -48,4 +48,5 @@ utils.py - Configuration management and cryptography.
 
 loading.py - Terminal UI elements.
 
-if any problems persist contact me on Discord: @JCNA9029 
+## 📞 Contact 
+if found any problems contact me on Discord: @JCNA9029 
