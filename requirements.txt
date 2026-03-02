@@ -1,0 +1,6 @@
+requests
+pefile
+lightgbm
+numpy
+ollama
+thrember
