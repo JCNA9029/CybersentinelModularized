@@ -16,7 +16,7 @@ class ScannerLogic:
         self.ml_scanner = LocalScanner()
         self.session_log = []
         
-     #logs the even for the text file and also prints it to the screen
+     #logs the event for the text file and also prints it to the screen
     def log_event(self, message, print_to_screen=True):
         if print_to_screen:
             print(message)
