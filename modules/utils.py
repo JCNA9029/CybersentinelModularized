@@ -51,6 +51,7 @@ def save_config(api_key):
         print(f"[-] Failed to save configuration: {e}")
         return False
     
+    #Checking the internet connection by trying to connect to Google's DNS server.
 def check_internet(host="8.8.8.8", port=53, timeout=3):
     try:
         socket.setdefaulttimeout(timeout)
@@ -58,7 +59,8 @@ def check_internet(host="8.8.8.8", port=53, timeout=3):
         return True
     except socket.error:
         return False
-
+    
+    #SHA 256 hashing function to generate a unique identifier for files
 def get_sha256(file_path):
     sha256 = hashlib.sha256()
     try:
@@ -68,7 +70,8 @@ def get_sha256(file_path):
         return sha256.hexdigest()
     except FileNotFoundError:
         return None
-
+    
+    #sanitation to remove unnecessary characters from the file.
 def sanitize_path(path):
     if not path: return ''
     return path.strip().lstrip("& ").strip("'\"").strip()

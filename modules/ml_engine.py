@@ -79,6 +79,7 @@ class LocalScanner:
         }
         
         try:
+            #looking if the file has PE attribute (Windows Executable: .exe, .dll, .sys)
             pe = pefile.PE(file_path)
             if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
                 for entry in pe.DIRECTORY_ENTRY_IMPORT:
@@ -93,7 +94,7 @@ class LocalScanner:
 
     def scan_stage1(self, file_path):
         """Runs the lightweight detection model and returns the features for reuse."""
-        loading_spinner = Spinner(f"[*] Extracting features... (Using thrember)")
+        loading_spinner = Spinner(f"[*] Extracting features...")
         loading_spinner.start()
         features = self.extract_features(file_path)
         loading_spinner.stop()

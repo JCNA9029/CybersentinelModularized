@@ -16,12 +16,12 @@ class ScannerLogic:
         self.ml_scanner = LocalScanner()
         self.session_log = []
 
-    def log_event(self, message, print_to_screen=True):
+    def log_event(self, message, print_to_screen=True): #logs the even for the text file and also prints it to the screen
         if print_to_screen:
             print(message)
         self.session_log.append(message)
 
-    def get_ai_explanation(self, family_name, detected_apis=None, file_path=""):
+    def get_ai_explanation(self, family_name, detected_apis=None, file_path=""): #AI Prompts
         api_context = ", ".join(detected_apis) if detected_apis else "No suspicious APIs detected."
         prompt = f"""
         ANALYSIS TASK:
@@ -52,9 +52,9 @@ class ScannerLogic:
             print("[-] File could not be read.")
             return
 
-        # --- ADD THIS SEPARATOR LINE ---
+        # --- SEPARATOR LINE ---
         self.log_event("-" * 60)
-        # -------------------------------
+        
         
         self.log_event(f"[*] Target File: {os.path.basename(file_path)}")
         self.log_event(f"[*] Target SHA256: {sha256}")
@@ -80,15 +80,17 @@ class ScannerLogic:
             # Only run the heavy ML if the file is a reasonable size
             self.run_local_ml(file_path)
 
+        #VirusTotal 
     def query_virustotal(self, sha256, force_details=False, is_batch=False):
         url = BASE_URL + sha256
         response = requests.get(url, headers=self.headers)
         
+        #Response handling with more detailed error messages and user guidance based on the status code returned by the VirusTotal API
         if response.status_code == 200:
             self.parse_vt_response(response.json(), force_details, is_batch)
             return True
         elif response.status_code == 404:
-            if not is_batch: # Only print this if it's a single manual search
+            if not is_batch: 
                 self.log_event("[-] File/Hash not found in VirusTotal database.")
             return False
         elif response.status_code == 400:
@@ -104,6 +106,7 @@ class ScannerLogic:
             self.log_event(f"[-] VT API Error: {response.status_code} - {response.text}")
             return False
 
+        #Shows the results from the VirusTotal in a readable format
     def parse_vt_response(self, json_data, force_details, is_batch):
         attributes = json_data.get('data', {}).get('attributes', {})
         stats = attributes.get('last_analysis_stats', {})
@@ -120,6 +123,7 @@ class ScannerLogic:
         )
         self.log_event(summary)
 
+        #Gives idea on what the other name of the scanned file is and also gives the option to show the detailed results of the scan if the user wants to see it
         if other_names:
             alt_names_str = ", ".join(other_names[:5])
             self.log_event(f"[*] Also known as: {alt_names_str}")
@@ -142,6 +146,7 @@ class ScannerLogic:
                     details += "All reporting engines marked this as Undetected/Safe.\n"
                 self.log_event(details)
 
+        #Labeling the risk based on the number of detections and giving the user a guidance on what to do next
     def get_risk_label(self, score, is_malicious):
         if is_malicious:
             if score > 0.90: return "CRITICAL RISK", "Certain"
@@ -153,6 +158,7 @@ class ScannerLogic:
             elif confidence > 0.70: return "CLEAN", "Moderate"
             else: return "UNKNOWN/LOW RISK", "Weak"
 
+        #Local Machine Learning Analysis
     def run_local_ml(self, file_path):
         self.log_event("\n--- Local AI Scanner ---")
         result = self.ml_scanner.scan_stage1(file_path)
@@ -166,8 +172,9 @@ class ScannerLogic:
                 self.log_event(f"[!] VERDICT: {label}")
                 self.log_event(f"[*] Confidence: {confidence_type} ({score:.2%})")
                 self.log_event("[!] Action Guidance: Quarantine this file immediately.")
-                
                 print("")
+
+                # If the file is flagged as malicious, offer the option to run the heavy family classification model for more insights
                 ans = input("[?] Do you want to run the heavy Stage 2 Family Analysis to identify the malware strain? (Y/N): ").strip().lower()
                 if ans == 'y':
                     fam_result = self.ml_scanner.scan_stage2(result['features'])
@@ -194,6 +201,7 @@ class ScannerLogic:
             print("Exiting. Stay secure!")
             sys.exit()
 
+        #Separator line before the save prompt
         print("\n" + "="*50)
         ans = input("[?] Would you like to save these results to a file? (Y/N): ").strip().lower()
         if ans == 'y':
@@ -201,6 +209,7 @@ class ScannerLogic:
             if not filename: filename = "scan_results"
             if not filename.endswith('.txt'): filename += '.txt'
             
+            #Scan report formatting and saving
             try:
                 with open(filename, 'w', encoding='utf-8') as f:
                     f.write("="*60 + "\n")
