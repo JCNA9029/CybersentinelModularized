@@ -1,0 +1,12 @@
+{
+    "0": "AgentTesla",
+    "1": "Emotet",
+    "2": "WannaCry",
+    "3": "Mirai",
+    "4": "CobaltStrike",
+    "5": "NjRAT",
+    "6": "TrickBot",
+    "7": "Remcos",
+    "8": "Qakbot",
+    "9": "Formbook"
+}

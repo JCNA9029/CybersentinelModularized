@@ -1,0 +1,28 @@
+============================================================
+ CYBERSENTINEL SCAN REPORT
+ Generated: 2026-03-03 00:26:10.387314
+============================================================------------------------------------------------------------
+
+[*] Target File: C3SA Module 6.pdf
+
+[*] Target SHA256: 22e8a9cc58b896fbdf62f606bf6a556d204940c8c1e0a47eb6e5446d67415cf3
+
+[*] File Size: 3.21 MB
+
+[-] File/Hash not found in VirusTotal database.
+
+[-] File not found in VirusTotal database. Falling back to Local ML...
+
+
+--- Local AI Scanner ---
+
+[+] VERDICT: SAFE
+
+[*] Confidence: High (99.13%)
+
+[+] Action Guidance: No immediate threat found. File is likely safe.
+
+============================================================
+ END OF REPORT
+============================================================
+
