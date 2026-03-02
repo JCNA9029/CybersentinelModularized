@@ -33,7 +33,7 @@ ollama run llama3:8b
 
 ## 💻 Usage
 Run the main interface from your terminal:
-python CyberSentinel2026.py
+**python CyberSentinel2026.py**
 
 On the first boot, the program will prompt you for a VirusTotal API key. This key will be encrypted via XOR/Base64 and stored locally in a config.json file for future sessions.
 
