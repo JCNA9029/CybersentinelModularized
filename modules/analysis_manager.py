@@ -15,8 +15,9 @@ class ScannerLogic:
         self.headers = {"accept": "application/json"}
         self.ml_scanner = LocalScanner()
         self.session_log = []
-
-    def log_event(self, message, print_to_screen=True): #logs the even for the text file and also prints it to the screen
+        
+     #logs the even for the text file and also prints it to the screen
+    def log_event(self, message, print_to_screen=True):
         if print_to_screen:
             print(message)
         self.session_log.append(message)
