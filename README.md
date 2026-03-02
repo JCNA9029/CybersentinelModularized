@@ -17,8 +17,8 @@ To run this program locally, you must have the following installed:
 
 **1. Clone the repository**
 
-git clone [https://github.com/JCNA9029/CyberSentinel2026.git](https://github.com/JCNA9029/CyberSentinel2026.git)
-cd CyberSentinel2026
+git clone [https://github.com/JCNA9029/CybersentinelModularized.git](https://github.com/JCNA9029/CybersentinelModularized.git)
+cd CybersentinelModularized
 
 **2. Install Python dependencies**
 
