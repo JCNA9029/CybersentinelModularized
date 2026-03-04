@@ -3,18 +3,27 @@ import socket
 import json 
 import os  
 import base64
+import uuid
 
 CONFIG_FILE = "config.json"
 
-CONFIG_FILE = "config.json"
-SECRET_KEY = b"CyberSentinel2026" # The internal key used to scramble the data
+def get_machine_key() -> bytes:
+    """
+    Generates a dynamic encryption key bound to the physical hardware of the machine.
+    Uses the MAC address and hashes it via SHA-256 to create a secure 32-byte key.
+    """
+    hardware_id = str(uuid.getnode())
+    return hashlib.sha256(hardware_id.encode()).digest()
 
 def encrypt_key(api_key):
     """Scrambles the API key using XOR and Base64."""
     if not api_key: return ""
+    
     api_bytes = api_key.encode('utf-8')
-    # XOR each byte of the API key with our Secret Key
-    xored = bytes(a ^ b for a, b in zip(api_bytes, SECRET_KEY * (len(api_bytes) // len(SECRET_KEY) + 1)))
+    dynamic_key = get_machine_key()  # Fetch the hardware-bound key
+    
+    # XOR each byte of the API key with our dynamic key
+    xored = bytes(a ^ b for a, b in zip(api_bytes, dynamic_key * (len(api_bytes) // len(dynamic_key) + 1)))
     return base64.b64encode(xored).decode('utf-8')
 
 def decrypt_key(encrypted_key):
@@ -22,8 +31,10 @@ def decrypt_key(encrypted_key):
     if not encrypted_key: return ""
     try:
         enc_bytes = base64.b64decode(encrypted_key)
+        dynamic_key = get_machine_key()  # Fetch the hardware-bound key
+        
         # Reversing an XOR cipher is just doing XOR again
-        xored = bytes(a ^ b for a, b in zip(enc_bytes, SECRET_KEY * (len(enc_bytes) // len(SECRET_KEY) + 1)))
+        xored = bytes(a ^ b for a, b in zip(enc_bytes, dynamic_key * (len(enc_bytes) // len(dynamic_key) + 1)))
         return xored.decode('utf-8')
     except Exception:
         return ""
