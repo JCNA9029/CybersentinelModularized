@@ -4,6 +4,7 @@ import requests
 import datetime
 import ollama
 from .loading import Spinner
+from .quarantine import quarantine_file
 from .ml_engine import LocalScanner
 from . import utils
 
@@ -189,6 +190,13 @@ class ScannerLogic:
                     loading_spinner.stop()
                     self.log_event("\n--- AI Analyst Report ---")
                     self.log_event(report)
+                    
+                # The User Authorization Gate
+                choice = input("[?] Do you want to quarantine this file immediately? (Y/N): ").strip().upper()
+                if choice == 'Y':
+                    quarantine_file(file_path)
+                else:
+                    print("[!] Action aborted. The file remains in its original location.")
             else:
                 self.log_event(f"[+] VERDICT: {label}")
                 self.log_event(f"[*] Confidence: {confidence_type} ({1-score:.2%})")
