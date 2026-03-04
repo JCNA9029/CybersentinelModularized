@@ -23,30 +23,56 @@ class ScannerLogic:
             print(message)
         self.session_log.append(message)
 
-    def get_ai_explanation(self, family_name, detected_apis=None, file_path=""): #AI Prompts
-        api_context = ", ".join(detected_apis) if detected_apis else "No suspicious APIs detected."
+    def get_ai_explanation(self, family_name, detected_apis=None, file_path="", confidence_score=0.0): 
+        # 1. Format the API list or provide a technical reason for its absence
+        if detected_apis and len(detected_apis) > 0:
+            api_context = "\n".join([f"- {api}" for api in detected_apis])
+        else:
+            api_context = "None extracted. The file is likely utilizing a packer (e.g., UPX), encrypted payloads, or API hashing to evade static analysis."
+
+        # 2. Prevent hallucination on unknown Family IDs
+        family_context = family_name
+        if "Family ID #" in family_name:
+            family_context += " (Heuristic match. Instruct analyst to focus entirely on behavioral API analysis rather than family history.)"
+
+        # 3. The Strict EDR Prompt
         prompt = f"""
-        ANALYSIS TASK:
-        Malware Family: {family_name}
-        Detected API Imports: {api_context}
+        [SYSTEM: EDR TRIAGE REPORT GENERATION]
         Target File: {os.path.basename(file_path)}
+        Malware Classification: {family_context}
+        AI Confidence Score: {confidence_score:.2f}%
+        Extracted Windows APIs:
+        {api_context}
 
-        As a Senior Malware Researcher, explain:
-        1. The core threat of this family.
-        2. How the specific APIs detected ({api_context}) are likely being used by this malware.
-        3. The risk to the user's data.
-        4. Any recommended immediate actions for the user.
+        TASK: Generate a highly technical malware triage report. 
+        If specific APIs are listed, explain EXACTLY how they are chained together to perform malicious actions. Map the APIs to MITRE ATT&CK tactics (e.g., Process Injection, Defense Evasion, Command and Control) where applicable.
+        Do not use conversational filler. Do not introduce yourself. 
 
-        Be precise and on point. Only show the results and do not introduce yourself.
+        Format the output EXACTLY using these four headers:
+
+        ### 🔴 Threat Classification
+        (1-2 sentences explaining the core threat of the malware family or the potential behavior if the family is an unknown heuristic match.)
+
+        ### ⚙️ API Behavioral Analysis
+        (Explain the technical intent behind the specific APIs detected. If no APIs were detected, explain the specific evasion techniques likely being used.)
+
+        ### ⚠️ System Impact & Risk
+        (What exactly happens to the victim's data, memory, or network capability?)
+
+        ### 🛡️ Recommended Mitigation
+        (Actionable, technical isolation and remediation steps beyond just "delete the file".)
         """
+        
         try:
+            # Setting a low temperature (e.g., 0.2) forces the LLM to be highly analytical and less "creative"
             response = ollama.chat(model='llama3:8b', messages=[
-                {'role': 'system', 'content': 'You are a professional cybersecurity analyst.'},
+                {'role': 'system', 'content': 'You are a strictly analytical, automated Endpoint Detection and Response (EDR) triage engine.'},
                 {'role': 'user', 'content': prompt},
-            ])
+            ], options={'temperature': 0.2})
+            
             return response['message']['content']
         except Exception as e:
-            return f"Analyst Offline: {e}"
+            return f"[-] Analyst Engine Offline: {e}"
 
     def scan_file(self, file_path):
         sha256 = utils.get_sha256(file_path)
@@ -177,7 +203,7 @@ class ScannerLogic:
                 print("")
 
                 # If the file is flagged as malicious, offer the option to run the heavy family classification model for more insights
-                ans = input("[?] Do you want to run the heavy Stage 2 Family Analysis to identify the malware strain? (Y/N): ").strip().lower()
+                ans = input("[?] Do you want to run the heavy Stage 2 Family Analysis to identify the malware strain (This will take time)? (Y/N): ").strip().lower()
                 if ans == 'y':
                     fam_result = self.ml_scanner.scan_stage2(result['features'])
                     if fam_result:
