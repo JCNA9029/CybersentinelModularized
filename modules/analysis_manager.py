@@ -6,6 +6,7 @@ import ollama
 from .loading import Spinner
 from .quarantine import quarantine_file
 from .ml_engine import LocalScanner
+import psutil
 from . import utils
 
 BASE_URL = 'https://www.virustotal.com/api/v3/files/'
@@ -23,7 +24,68 @@ class ScannerLogic:
             print(message)
         self.session_log.append(message)
 
-    def get_ai_explanation(self, family_name, detected_apis=None, file_path="", confidence_score=0.0): 
+    def scan_active_processes(self):
+        """
+        EDR Module: Enumerates active processes in memory.
+        Filters out core Windows system binaries to prevent OS corruption.
+        """
+        self.log_event("\n--- Live Process Memory Triage ---")
+        self.log_event("[*] Enumerating active processes...")
+
+        suspicious_procs = []
+        try:
+            # Iterate through all running processes, grabbing their ID, Name, and File Path
+            for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                try:
+                    exe_path = proc.info['exe']
+                    # BLUE TEAM SAFEGUARD: Ignore standard Windows OS files to prevent accidental system death
+                    if exe_path and "C:\\Windows" not in exe_path:
+                        suspicious_procs.append({
+                            'pid': proc.info['pid'],
+                            'name': proc.info['name'],
+                            'path': exe_path
+                        })
+                except (psutil.AccessDenied, psutil.NoSuchProcess):
+                    # Windows restricts access to SYSTEM processes unless running as Admin. We safely ignore them.
+                    continue
+        except Exception as e:
+            self.log_event(f"[-] Failed to enumerate processes: {e}")
+            return
+
+        if not suspicious_procs:
+            self.log_event("[+] No non-system processes found. System appears clean.")
+            return
+
+        # Display the live processes in a clean CLI table
+        print(f"\n{'PID':<10} | {'Process Name':<25} | {'Executable Path'}")
+        print("-" * 80)
+        # Display the last 20 processes (usually the most recently launched)
+        for p in suspicious_procs[-20:]: 
+            # Truncate long paths for terminal readability
+            display_path = p['path'] if len(p['path']) < 40 else "..." + p['path'][-37:]
+            print(f"{p['pid']:<10} | {p['name']:<25} | {display_path}")
+
+        choice = input("\n[?] Enter the PID of the process to scan (or press Enter to cancel): ").strip()
+        if not choice.isdigit():
+            return
+
+        target_pid = int(choice)
+        target_path = None
+        
+        # Match the user's PID to the physical file path
+        for p in suspicious_procs:
+            if p['pid'] == target_pid:
+                target_path = p['path']
+                break
+
+        if target_path and os.path.exists(target_path):
+            self.log_event(f"\n[*] Initiating EDR Scan on Process ID {target_pid}...")
+            # Route the live process file directly into your existing scanning pipeline!
+            self.scan_file(target_path)
+        else:
+            print("[-] Invalid PID or the process terminated before scanning.")
+
+    def get_ai_explanation(self, family_name, detected_apis=None, file_path="", confidence_score=0.0, sha256="", file_size_mb=0.0): 
         # 1. Format the API list or provide a technical reason for its absence
         if detected_apis and len(detected_apis) > 0:
             api_context = "\n".join([f"- {api}" for api in detected_apis])
@@ -39,6 +101,8 @@ class ScannerLogic:
         prompt = f"""
         [SYSTEM: EDR TRIAGE REPORT GENERATION]
         Target File: {os.path.basename(file_path)}
+        Target SHA256: {sha256}
+        File Size: {file_size_mb:.2f} MB
         Malware Classification: {family_context}
         AI Confidence Score: {confidence_score:.2f}%
         Extracted Windows APIs:
@@ -61,6 +125,12 @@ class ScannerLogic:
 
         ### 🛡️ Recommended Mitigation
         (Actionable, technical isolation and remediation steps beyond just "delete the file".)
+
+        ### 🎯 Generated YARA Rule
+        (Write a valid, strictly formatted YARA rule to detect this threat. 
+        - Include a 'meta' section with description, author="CyberSentinel Automated Triage", date, and the provided SHA256 hash.
+        - Include a 'strings' section containing the detected APIs (if any).
+        - Include a 'condition' section. The condition MUST check that the file is a Windows PE by verifying the magic byte: `uint16(0) == 0x5A4D`. It should also match the strings or file size.)
         """
         
         try:
@@ -91,12 +161,22 @@ class ScannerLogic:
         file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
         self.log_event(f"[*] File Size: {file_size_mb:.2f} MB")
         
-        # Layer 1: Cloud API
-        vt_success = False
+      # Layer 1: Cloud API
         if self.api_key:
-            vt_success = self.query_virustotal(sha256, is_batch=False)
-            if vt_success:
-                return
+            vt_result = self.query_virustotal(sha256, is_batch=False)
+            
+            if vt_result == "MALICIOUS":
+                self.log_event("[!] Action Guidance: Cloud consensus confirms this is a known threat.")
+                choice = input("\n[?] Do you want to quarantine this file immediately? (Y/N): ").strip().upper()
+                if choice == 'Y':
+                    quarantine_file(file_path)
+                return # End scan. VT handled the threat.
+                
+            elif vt_result == "SAFE":
+                self.log_event("[+] Action Guidance: VirusTotal confirms this file is safe. No further analysis needed.")
+                return # End scan. The file is perfectly clean.
+                
+            # If vt_result is "UNKNOWN" or "ERROR", the code simply continues downward...
             self.log_event("[*] Proceeding to Local ML Fallback...")
         
         # Layer 2: Local AI (With Size Limit)
@@ -105,35 +185,35 @@ class ScannerLogic:
             self.log_event("[!] File exceeds the 50MB threshold for local Machine Learning extraction.")
             self.log_event("[*] Action Guidance: Rely on VirusTotal Cloud results or scan manually.")
         else:
-            # Only run the heavy ML if the file is a reasonable size
-            self.run_local_ml(file_path)
+            # Pass the data.
+            self.run_local_ml(file_path, sha256, file_size_mb)
 
         #VirusTotal 
     def query_virustotal(self, sha256, force_details=False, is_batch=False):
         url = BASE_URL + sha256
         response = requests.get(url, headers=self.headers)
         
-        #Response handling with more detailed error messages and user guidance based on the status code returned by the VirusTotal API
         if response.status_code == 200:
-            self.parse_vt_response(response.json(), force_details, is_batch)
-            return True
+            # CAPTURE the string from parse_vt_response and pass it up!
+            return self.parse_vt_response(response.json(), force_details, is_batch)
+            
         elif response.status_code == 404:
             if not is_batch: 
                 self.log_event("[-] File/Hash not found in VirusTotal database.")
-            return False
-        elif response.status_code == 400:
-            self.log_event(f"[-] VT API Error 400: Bad Request. The hash '{sha256}' is malformed or does not exist.")
-            return False
+            return "UNKNOWN" # Triggers the local ML
+            
         elif response.status_code == 401:
             self.log_event("[-] VT API Error 401: Unauthorized. Please check your API Key.")
-            return False
+            return "ERROR"
+            
         elif response.status_code == 429:
             self.log_event("[-] VT API Error 429: Rate limit exceeded. You are scanning too fast!")
-            return False
+            return "ERROR"
+            
         else:
             self.log_event(f"[-] VT API Error: {response.status_code} - {response.text}")
-            return False
-
+            return "ERROR"
+        
         #Shows the results from the VirusTotal in a readable format
     def parse_vt_response(self, json_data, force_details, is_batch):
         attributes = json_data.get('data', {}).get('attributes', {})
@@ -174,6 +254,12 @@ class ScannerLogic:
                     details += "All reporting engines marked this as Undetected/Safe.\n"
                 self.log_event(details)
 
+        malicious_count = stats.get('malicious', 0)
+        if malicious_count >= 3:
+            return "MALICIOUS"
+        else:
+            return "SAFE"
+
         #Labeling the risk based on the number of detections and giving the user a guidance on what to do next
     def get_risk_label(self, score, is_malicious):
         if is_malicious:
@@ -187,45 +273,56 @@ class ScannerLogic:
             else: return "UNKNOWN/LOW RISK", "Weak"
 
         #Local Machine Learning Analysis
-    def run_local_ml(self, file_path):
+    def run_local_ml(self, file_path, sha256, file_size_mb):
         self.log_event("\n--- Local AI Scanner ---")
         result = self.ml_scanner.scan_stage1(file_path)
-        
+        #getting the score, verdict and the detected apis from the result of the local machine learning analysis
         if result:
             score = result['score']
-            is_malicious = result['is_malicious']
-            label, confidence_type = self.get_risk_label(score, is_malicious)
+            verdict = result['verdict']
+            apis = result['detected_apis']
             
-            if is_malicious:
-                self.log_event(f"[!] VERDICT: {label}")
-                self.log_event(f"[*] Confidence: {confidence_type} ({score:.2%})")
-                self.log_event("[!] Action Guidance: Quarantine this file immediately.")
+            self.log_event(f"[*] Local ML Verdict: {verdict} (Confidence: {score:.2%})")
+            
+            if verdict == "CRITICAL RISK":
+                self.log_event("[!] Action Guidance: High confidence threat. Quarantine recommended.")
                 print("")
 
-                # If the file is flagged as malicious, offer the option to run the heavy family classification model for more insights
-                ans = input("[?] Do you want to run the heavy Stage 2 Family Analysis to identify the malware strain (This will take time)? (Y/N): ").strip().lower()
+                ans = input("[?] Do you want to run the heavy Stage 2 Family Analysis to identify the malware strain? (Y/N): ").strip().lower()
+                fam_name = "Unknown"
                 if ans == 'y':
                     fam_result = self.ml_scanner.scan_stage2(result['features'])
                     if fam_result:
-                        name = fam_result.get('family_name') or fam_result.get('name') or "Unknown"
-                        self.log_event(f"[*] STAGE 2 CLASSIFICATION: {fam_result.get('family_name', 'Unknown')}")
+                        fam_name = fam_result.get('family_name', 'Unknown')
+                        self.log_event(f"[*] STAGE 2 CLASSIFICATION: {fam_name}")
         
-                    loading_spinner = Spinner("[*] Consulting Local AI Analyst for a threat report...")
-                    loading_spinner.start()
-                    report = self.get_ai_explanation(fam_result.get('family_name', 'Unknown'), [], file_path)
-                    loading_spinner.stop()
-                    self.log_event("\n--- AI Analyst Report ---")
-                    self.log_event(report)
+                # ... [previous code] ...
+                
+                loading_spinner = Spinner("[*] Consulting Local AI Analyst for a threat report...")
+                loading_spinner.start()
+                
+                # Inject the extracted behavioral telemetry (APIs) and inference confidence 
+                # into the LLM context window for semantic evaluation and MITRE ATT&CK mapping.
+                # Pass the hash and size into the prompt.
+                report = self.get_ai_explanation(fam_name, apis, file_path, score * 100, sha256, file_size_mb)
+                
+                loading_spinner.stop()
+                
+                # ... [rest of code] ...
+                
+                self.log_event("\n--- AI Analyst Report ---")
+                self.log_event(report)
                     
-                # The User Authorization Gate
-                choice = input("[?] Do you want to quarantine this file immediately? (Y/N): ").strip().upper()
+                choice = input("\n[?] Do you want to quarantine this file immediately? (Y/N): ").strip().upper()
                 if choice == 'Y':
                     quarantine_file(file_path)
                 else:
                     print("[!] Action aborted. The file remains in its original location.")
+                    
+            elif verdict == "SUSPICIOUS":
+                self.log_event("[!] Warning: Local ML detected anomalies but lacks confidence for isolation.")
+                self.log_event("[!] Action Guidance: As this file is unknown to Cloud AV, manual dynamic analysis in a sandbox is recommended before execution.")
             else:
-                self.log_event(f"[+] VERDICT: {label}")
-                self.log_event(f"[*] Confidence: {confidence_type} ({1-score:.2%})")
                 self.log_event("[+] Action Guidance: No immediate threat found. File is likely safe.")
         else:
             self.log_event("[-] Analysis failed: The file could not be processed by the ML engine.")
