@@ -1,4 +1,5 @@
 import os
+import time
 from modules import ScannerLogic, utils
 
 class CyberSentinelUI:
@@ -38,19 +39,35 @@ class CyberSentinelUI:
                 self.logic.log_event("\n[!] Running in Local Machine Learning Mode only.")
     
     def update_settings(self):
-        """Allows the user to change or clear their saved API key."""
+        """Allows the user to change or clear their saved API key with built-in safeguards."""
         print("\n--- Settings: Update API Key ---")
+        
+        # Show the user their current state so they aren't guessing
+        current_status = "Active/Saved" if self.logic.api_key else "Not Set"
+        print(f"[*] Current API Key Status: {current_status}")
         print("Note: Right-click to paste your new key into the terminal.")
-        new_key = input("Enter new VirusTotal API Key (leave blank to clear saved key): ").strip()
         
-        self.logic.api_key = new_key if new_key else None
-        self.logic.headers["x-apikey"] = new_key if new_key else ""
-        utils.save_config(new_key)
+        # The new, explicit prompt
+        new_key = input("Enter new API Key (Type 'CLEAR' to remove, or press Enter to cancel): ").strip()
         
-        if new_key:
-            print("[+] API Key updated and saved successfully.")
-        else:
+        # 1. The Escape Hatch (User just pressed Enter)
+        if not new_key:
+            print("[*] Update cancelled. Existing settings remain unchanged.")
+            return # Safely exit the function without touching the saved configuration
+            
+        # 2. Explicit Deletion
+        if new_key.upper() == 'CLEAR':
+            self.logic.api_key = None
+            self.logic.headers["x-apikey"] = ""
+            utils.save_config("") # Overwrite the config with a blank string
             print("[+] API Key cleared. VirusTotal scanning is now disabled.")
+            return
+            
+        # 3. Standard Update
+        self.logic.api_key = new_key
+        self.logic.headers["x-apikey"] = new_key
+        utils.save_config(new_key)
+        print("[+] API Key updated and saved successfully.")
 
     def batch_scan(self):
         if not self.logic.api_key:
@@ -69,6 +86,17 @@ class CyberSentinelUI:
                 hashes = [line.strip() for line in f if line.strip()]
                 
             print(f"\n[*] Starting batch scan for {len(hashes)} hashes...")
+            print("[*] Note: To respect cloud API rate limits, scans will pause for 15 seconds between hashes.")
+            
+            for index, h in enumerate(hashes):
+                self.logic.log_event("-" * 60)
+                self.logic.log_event(f"[*] Checking hash {index + 1}/{len(hashes)}: {h}")
+                self.logic.query_virustotal(h, force_details=show_details, is_batch=True)
+                
+                # Prevent Rate Limiting (4 requests per minute)
+                if index < len(hashes) - 1:
+                    time.sleep(15)
+
             for h in hashes:
                 # --- ADD THE SEPARATOR HERE ---
                 self.logic.log_event("-" * 60)
@@ -90,39 +118,66 @@ class CyberSentinelUI:
             print("1. Scan a local file")
             print("2. Scan a specific SHA256 Hash")
             print("3. Batch scan a list of hashes (.txt)")
-            print("4. Settings (Update API Key)")
-            print("5. Exit")
-            choice = input("Select an option (1-5): ").strip()
+            print("4. Scan Active Running Processes (Live EDR)")
+            print("5. Settings (Update API Key)")
+            print("6. Exit")
+            choice = input("Select an option (1-6): ").strip()
 
             if choice == '1':
-                file_path = utils.sanitize_path(input("Drag and drop the file you want to scan (or press Enter to cancel): "))
-                if file_path and os.path.exists(file_path):
-                    self.logic.scan_file(file_path)
-                elif not file_path:
-                    continue
-                else:
-                    print("[-] Invalid file path.")
+                while True:
+                    file_path = utils.sanitize_path(input("\nDrag and drop the file you want to scan (or press Enter to cancel): "))
+                    if not file_path: 
+                        break # User pressed Enter, back to main menu
+                    
+                    if os.path.exists(file_path):
+                        self.logic.scan_file(file_path)
+                    else:
+                        print("[-] Invalid file path.")
+                        
+                    # The QoL Prompt
+                    if input("\n[?] Do you want to scan another local file? (Y to continue / Any other key for Menu): ").strip().upper() != 'Y':
+                        break
+
             elif choice == '2':
                 if not self.logic.api_key:
                     print("[-] Hash scanning requires a VirusTotal API key.")
                     continue
-                # Added a cancel option here for better User Experience
-                raw_hash = input("Input the SHA256 (or press Enter to cancel): ").strip()
-                # If the user just presses Enter, kick them back to the main menu
-                if not raw_hash:
-                    continue    
-                sha_hash = utils.sanitize_path(raw_hash)
-                # Validate the hash before wasting an API call
-                if len(sha_hash) not in [32, 40, 64]:
-                    print(f"[-] Error: Invalid hash length ({len(sha_hash)} chars).")
-                    continue
-                self.logic.query_virustotal(sha_hash)
+                    
+                while True:
+                    raw_hash = input("\nInput the SHA256 (or press Enter to cancel): ").strip()
+                    if not raw_hash: 
+                        break    
+                    
+                    sha_hash = utils.sanitize_path(raw_hash)
+                    if len(sha_hash) not in [32, 40, 64]:
+                        print(f"[-] Error: Invalid hash length ({len(sha_hash)} chars).")
+                    else:
+                        self.logic.query_virustotal(sha_hash)
+                        
+                    # The QoL Prompt
+                    if input("\n[?] Do you want to check another hash? (Y to continue / Any other key for Menu): ").strip().upper() != 'Y':
+                        break
+
             elif choice == '3':
-                self.batch_scan()
+                while True:
+                    self.batch_scan()
+                    # The QoL Prompt
+                    if input("\n[?] Do you want to run another batch scan? (Y to continue / Any other key for Menu): ").strip().upper() != 'Y':
+                        break
+
             elif choice == '4':
-                self.update_settings()
+                while True:
+                    self.logic.scan_active_processes()
+                    # The QoL Prompt
+                    if input("\n[?] Do you want to scan another active process? (Y to continue / Any other key for Menu): ").strip().upper() != 'Y':
+                        break
+
             elif choice == '5':
+                self.update_settings()
+                
+            elif choice == '6':
                 self.logic.exit_program()
+                
             else:
                 print("[-] Invalid selection.")
 
