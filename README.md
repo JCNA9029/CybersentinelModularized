@@ -44,7 +44,7 @@ winget install -e --id Ollama.Ollama
 
 Ensure the Ollama desktop app is running in the background, then pull the required model:
 
-ollama run llama3:8b
+ollama run qwen2.5:3b
 
 *(Note: If the models/ directory is not included in this repository due to size limits, please download the EMBER2024 models from [HERE](https://drive.google.com/drive/folders/1dtVVH4Oo5RhoAiMPhqsB4T1X2dGX0v5N?usp=drive_link) and place it in the root directory).*
 
