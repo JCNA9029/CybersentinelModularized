@@ -65,7 +65,7 @@ class ScannerLogic:
         
         try:
             # Setting a low temperature (e.g., 0.2) forces the LLM to be highly analytical and less "creative"
-            response = ollama.chat(model='llama3:8b', messages=[
+            response = ollama.chat(model='qwen2.5:3b', messages=[
                 {'role': 'system', 'content': 'You are a strictly analytical, automated Endpoint Detection and Response (EDR) triage engine.'},
                 {'role': 'user', 'content': prompt},
             ], options={'temperature': 0.2})
