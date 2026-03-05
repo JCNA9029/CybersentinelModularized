@@ -12,7 +12,8 @@ except ImportError:
     print("    Install via: pip install git+https://github.com/FutureComputing4AI/EMBER2024.git")
 
 class LocalScanner:
-    def __init__(self, all_model_path='./models/EMBER2024_all.model', family_model_path='./models/EMBER2024_family.model', labels_path='./models/family_labels.json', threshold=0.5):
+    #0.7 threshold instead of 0.5 to reduce false positives. Low-level malware false negative is better than nuking an important .dll false positive.
+    def __init__(self, all_model_path='./models/EMBER2024_ALL.model', family_model_path='./models/EMBER2024_family.model', labels_path='./models/family_labels.json', threshold=0.7):
         self.all_model_path = all_model_path
         self.family_model_path = family_model_path
         self.labels_path = labels_path
@@ -64,6 +65,13 @@ class LocalScanner:
             extractor = thrember.PEFeatureExtractor()
             features = np.array(extractor.feature_vector(file_data), dtype=np.float32)
             return features.reshape(1, -1)
+        
+        except PermissionError:
+            print("\n[!!!] CRITICAL WARNING [!!!]")
+            print("[-] Extraction failed: Permission Denied.")
+            print("[-] The operating system has locked this file. This strongly indicates the malware is ACTIVELY RUNNING in memory.")
+            print("[-] Immediate system isolation and task termination is required.")
+            return None
         except Exception as e:
             print(f"[-] Extraction error: {e}")
             return None
@@ -93,7 +101,11 @@ class LocalScanner:
             return []
 
     def scan_stage1(self, file_path):
-        """Runs the lightweight detection model and returns the features for reuse."""
+        """
+        Executes Tier 2 offline machine learning inference.
+        Extracts structural PE features and applies a strict probability threshold
+        to mitigate the risk of false positives on critical system binaries.
+        """
         loading_spinner = Spinner(f"[*] Extracting features...")
         loading_spinner.start()
         features = self.extract_features(file_path)
@@ -102,23 +114,52 @@ class LocalScanner:
         if features is None:
             return None
 
+        # Verify model instantiation prior to executing inference
         if self.all_model is None:
             self.all_model = self.load_model(self.all_model_path)
             if self.all_model is None: 
-                
                 return None
-        score = self.all_model.predict(features)[0]
-        is_malicious = score > self.threshold
-       
-
-        apis = self.get_suspicious_apis(file_path)
-        return {
-            "score": float(score),
-            "is_malicious": is_malicious,
-            "features": features,
-            "detected_apis": apis
-        }
-
+        
+        try:
+            # Execute a single inference pass to optimize memory allocation and CPU cycles
+            raw_score = float(self.all_model.predict(features)[0])
+            
+            # --- CLASSIFICATION THRESHOLD LOGIC ---
+            # Evaluates the predictive probability against operational safety margins.
+            
+            if raw_score >= 0.75:
+                # 0.75+ indicates a high statistical probability of malicious intent.
+                # System grants authorization for active mitigation (quarantine).
+                verdict = "CRITICAL RISK"
+                is_malicious = True
+                
+            elif 0.50 <= raw_score < 0.75:
+                # 0.50 - 0.74 indicates anomalous structure lacking definitive malicious signatures.
+                # Flags the file for manual dynamic triage to prevent accidental denial-of-service.
+                verdict = "SUSPICIOUS"
+                is_malicious = False 
+                
+            else:
+                # < 0.50 indicates structural alignment with benign software baselines.
+                verdict = "SAFE"
+                is_malicious = False
+                
+            # Extract relevant Windows API calls for subsequent semantic analysis by the Tier 3 LLM
+            apis = self.get_suspicious_apis(file_path)
+            
+            # Construct and return the standardized assessment dictionary required by ScannerLogic
+            return {
+                "verdict": verdict,
+                "score": raw_score,
+                "is_malicious": is_malicious,
+                "features": features,
+                "detected_apis": apis
+            }
+            
+        except Exception as e:
+            print(f"[-] ML Inference execution failed: {e}")
+            return None
+        
     def scan_stage2(self, features):
         """Loads the heavy family model only when explicitly called."""
         if self.family_model is None:
