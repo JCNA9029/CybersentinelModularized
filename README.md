@@ -18,15 +18,32 @@ To run this program locally, you must have the following installed:
 **1. Clone the repository**
 
 git clone [https://github.com/JCNA9029/CybersentinelModularized.git](https://github.com/JCNA9029/CybersentinelModularized.git)
+
 cd CybersentinelModularized
 
 **2. Install Python dependencies**
 
 pip install -r requirements.txt
 
+If you can't install thrember, you can
+
+OPTION 1:
+
+1. Download the zip file in [EMBER2024](https://github.com/FutureComputing4AI/EMBER2024)
+2. Unzip and install it
+
+OPTION 2:
+1. Use git and type "pip install git+https://github.com/FutureComputing4AI/EMBER2024.git"
+2. Type "pip install -r requirements.txt" in cmd again
+
 **3. Initialize the AI Analyst (Ollama)**
 
+Install ollama using cmd 
+
+winget install -e --id Ollama.Ollama
+
 Ensure the Ollama desktop app is running in the background, then pull the required model:
+
 ollama run llama3:8b
 
 *(Note: If the models/ directory is not included in this repository due to size limits, please download the EMBER2024 models from [HERE](https://drive.google.com/drive/folders/1dtVVH4Oo5RhoAiMPhqsB4T1X2dGX0v5N?usp=drive_link) and place it in the root directory).*
