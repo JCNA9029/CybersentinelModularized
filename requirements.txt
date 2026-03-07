@@ -1,10 +1,11 @@
 requests
-pefile
+pefile==2024.8.26
 lightgbm
 numpy
 ollama
 thrember
-pefile==2024.8.26
 signify>=0.7.1
-lightgbm
 psutil
+watchdog
+wmi
+pywin32

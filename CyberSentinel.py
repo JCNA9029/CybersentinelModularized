@@ -1,6 +1,11 @@
+import argparse
 import os
+import sys
 import time
 from modules import ScannerLogic, utils
+from modules.virustotal_api import VirusTotalAPI
+from modules.live_edr import get_target_process_path
+from modules.network_isolation import restore_network
 
 class CyberSentinelUI:
     def __init__(self):
@@ -18,96 +23,93 @@ class CyberSentinelUI:
         print(banner)
 
     def setup_api(self):
-        # 1. Try to load the saved key first
-        saved_key = utils.load_config()
+        """Authenticates Tier 1 Cloud capability upon instantiation."""
+        config = utils.load_config()
+        saved_key = config.get("api_key", "")
+        self.logic.webhook_url = config.get("webhook_url", "")
         
         if saved_key:
             self.logic.api_key = saved_key
-            self.logic.headers["x-apikey"] = saved_key
-            print("[+] Welcome back! Loaded saved VirusTotal API Key.")
+            print("[+] Welcome back! Loaded saved Configuration.")
         else:
-            # 2. If no key is found, do the First-Time Setup
             print("\n--- First Time Setup ---")
             key = input("Enter your VirusTotal API Key (leave blank to skip VT): ").strip()
-            
             if key:
                 self.logic.api_key = key
-                self.logic.headers["x-apikey"] = key
-                utils.save_config(key) # Save it for next time!
+                utils.save_config(key, self.logic.webhook_url)
                 self.logic.log_event("[+] API Key saved successfully for future use.")
             else:
                 self.logic.log_event("\n[!] Running in Local Machine Learning Mode only.")
-    
+
     def update_settings(self):
-        """Allows the user to change or clear their saved API key with built-in safeguards."""
-        print("\n--- Settings: Update API Key ---")
+        """Exposed API and Webhook configuration interface."""
+        print("\n--- Settings: Update Configuration ---")
         
-        # Show the user their current state so they aren't guessing
-        current_status = "Active/Saved" if self.logic.api_key else "Not Set"
-        print(f"[*] Current API Key Status: {current_status}")
-        print("Note: Right-click to paste your new key into the terminal.")
+        # 1. API Key Setup
+        current_api = "Active/Saved" if self.logic.api_key else "Not Set"
+        print(f"[*] Current API Key Status: {current_api}")
+        new_key = input("Enter new API Key (Type 'CLEAR' to remove, or press Enter to keep current): ").strip()
         
-        # The new, explicit prompt
-        new_key = input("Enter new API Key (Type 'CLEAR' to remove, or press Enter to cancel): ").strip()
-        
-        # 1. The Escape Hatch (User just pressed Enter)
-        if not new_key:
-            print("[*] Update cancelled. Existing settings remain unchanged.")
-            return # Safely exit the function without touching the saved configuration
-            
-        # 2. Explicit Deletion
         if new_key.upper() == 'CLEAR':
             self.logic.api_key = None
-            self.logic.headers["x-apikey"] = ""
-            utils.save_config("") # Overwrite the config with a blank string
-            print("[+] API Key cleared. VirusTotal scanning is now disabled.")
-            return
+            new_key = ""
+            print("[+] API Key cleared. Cloud scanning disabled.")
+        elif not new_key:
+            new_key = self.logic.api_key # Keep existing
             
-        # 3. Standard Update
-        self.logic.api_key = new_key
-        self.logic.headers["x-apikey"] = new_key
-        utils.save_config(new_key)
-        print("[+] API Key updated and saved successfully.")
+        # 2. Webhook Setup
+        current_webhook = "Active/Saved" if self.logic.webhook_url else "Not Set"
+        print(f"\n[*] Current Webhook Status: {current_webhook}")
+        new_webhook = input("Enter new Webhook URL (Type 'CLEAR' to remove, or press Enter to keep current): ").strip()
+        
+        if new_webhook.upper() == 'CLEAR':
+            self.logic.webhook_url = ""
+            print("[+] Webhook cleared. SOC alerting disabled.")
+        elif new_webhook:
+            self.logic.webhook_url = new_webhook
+        else:
+            new_webhook = self.logic.webhook_url # Keep existing
+            
+        # Save both parameters simultaneously
+        utils.save_config(new_key or "", self.logic.webhook_url)
+        print("[+] Configuration updated successfully.")
+    def _continuous_loop(self, action_func, prompt_msg):
+        """Helper abstraction to keep the user in a continuous workflow."""
+        while True:
+            action_func()
+            if input(f"\n[?] {prompt_msg} (Y to continue / Any other key for Menu): ").strip().upper() != 'Y':
+                break
 
-    def batch_scan(self):
+    def _menu_scan_file(self):
+        file_path = utils.sanitize_path(input("\nDrag and drop the file to scan (or press Enter to cancel): "))
+        if file_path and os.path.exists(file_path):
+            self.logic.scan_file(file_path)
+        elif file_path:
+            print("[-] Invalid physical file path.")
+
+    def _menu_scan_hash(self):
         if not self.logic.api_key:
-            print("[-] Batch hash scanning requires a VirusTotal API key.")
+            print("[-] Hash scanning requires a VirusTotal API key.")
             return
             
-        file_path = utils.sanitize_path(input("Drag and drop the .txt file containing the SHA256 hashes: "))
-        if not os.path.exists(file_path) or not file_path.lower().endswith('.txt'):
-            print("[-] Invalid file. Please provide a valid .txt file.")
+        raw_hash = input("\nInput the SHA256 (or press Enter to cancel): ").strip()
+        if not raw_hash: 
             return
             
-        show_details = input("Include detailed AV engine results for each hash? (Y/N): ").strip().lower() == 'y'
-            
-        try:
-            with open(file_path, 'r') as f:
-                hashes = [line.strip() for line in f if line.strip()]
-                
-            print(f"\n[*] Starting batch scan for {len(hashes)} hashes...")
-            print("[*] Note: To respect cloud API rate limits, scans will pause for 15 seconds between hashes.")
-            
-            for index, h in enumerate(hashes):
-                self.logic.log_event("-" * 60)
-                self.logic.log_event(f"[*] Checking hash {index + 1}/{len(hashes)}: {h}")
-                self.logic.query_virustotal(h, force_details=show_details, is_batch=True)
-                
-                # Prevent Rate Limiting (4 requests per minute)
-                if index < len(hashes) - 1:
-                    time.sleep(15)
+        sha_hash = utils.sanitize_path(raw_hash)
+        if len(sha_hash) not in [32, 40, 64]:
+            print(f"[-] Error: Invalid hash length ({len(sha_hash)} chars).")
+        else:
+            vt_api = VirusTotalAPI(self.logic.api_key)
+            result = vt_api.query_hash(sha_hash)
+            print(f"[*] Cloud Result: {result.get('verdict', result.get('message'))}")
 
-            for h in hashes:
-                # --- ADD THE SEPARATOR HERE ---
-                self.logic.log_event("-" * 60)
-                
-                self.logic.log_event(f"[*] Checking hash: {h}")
-                self.logic.query_virustotal(h, force_details=show_details, is_batch=True)
-
-            self.logic.log_event("\n[*] Batch scan completed.")
-                
-        except Exception as e:
-            print(f"[-] Error reading batch file: {e}")
+    def _menu_live_edr(self):
+        """Routes the live RAM process path into the standard file scanner."""
+        target_path = get_target_process_path()
+        if target_path:
+            print(f"\n[*] Routing live process binary ({target_path}) into analysis pipeline...")
+            self.logic.scan_file(target_path)
 
     def run(self):
         self.print_banner()
@@ -117,75 +119,60 @@ class CyberSentinelUI:
             print("\n--- CyberSentinel Menu ---")
             print("1. Scan a local file")
             print("2. Scan a specific SHA256 Hash")
-            print("3. Batch scan a list of hashes (.txt)")
-            print("4. Scan Active Running Processes (Live EDR)")
-            print("5. Settings (Update API Key)")
+            print("3. Scan Active Running Processes (Live EDR)")
+            print("4. Settings (Update API Key / Webhook)")
+            print("5. Restore Network Access (Disable Isolation)")
             print("6. Exit")
             choice = input("Select an option (1-6): ").strip()
 
             if choice == '1':
-                while True:
-                    file_path = utils.sanitize_path(input("\nDrag and drop the file you want to scan (or press Enter to cancel): "))
-                    if not file_path: 
-                        break # User pressed Enter, back to main menu
-                    
-                    if os.path.exists(file_path):
-                        self.logic.scan_file(file_path)
-                    else:
-                        print("[-] Invalid file path.")
-                        
-                    # The QoL Prompt
-                    if input("\n[?] Do you want to scan another local file? (Y to continue / Any other key for Menu): ").strip().upper() != 'Y':
-                        break
-
+                self._continuous_loop(self._menu_scan_file, "Scan another local file?")
             elif choice == '2':
-                if not self.logic.api_key:
-                    print("[-] Hash scanning requires a VirusTotal API key.")
-                    continue
-                    
-                while True:
-                    raw_hash = input("\nInput the SHA256 (or press Enter to cancel): ").strip()
-                    if not raw_hash: 
-                        break    
-                    
-                    sha_hash = utils.sanitize_path(raw_hash)
-                    if len(sha_hash) not in [32, 40, 64]:
-                        print(f"[-] Error: Invalid hash length ({len(sha_hash)} chars).")
-                    else:
-                        self.logic.query_virustotal(sha_hash)
-                        
-                    # The QoL Prompt
-                    if input("\n[?] Do you want to check another hash? (Y to continue / Any other key for Menu): ").strip().upper() != 'Y':
-                        break
-
+                self._continuous_loop(self._menu_scan_hash, "Check another hash?")
             elif choice == '3':
-                while True:
-                    self.batch_scan()
-                    # The QoL Prompt
-                    if input("\n[?] Do you want to run another batch scan? (Y to continue / Any other key for Menu): ").strip().upper() != 'Y':
-                        break
-
+                self._continuous_loop(self._menu_live_edr, "Scan another active process?")
             elif choice == '4':
-                while True:
-                    self.logic.scan_active_processes()
-                    # The QoL Prompt
-                    if input("\n[?] Do you want to scan another active process? (Y to continue / Any other key for Menu): ").strip().upper() != 'Y':
-                        break
-
-            elif choice == '5':
                 self.update_settings()
-                
+            elif choice == '5':
+                restore_network()
             elif choice == '6':
-                self.logic.exit_program()
-                
+                self.logic.save_session_log()
+                print("Exiting. Stay secure!")
+                sys.exit()
             else:
                 print("[-] Invalid selection.")
 
 if __name__ == "__main__":
-    if utils.check_internet():
-        print("[*] Internet connected. Proceeding...")
+    import argparse
+    parser = argparse.ArgumentParser(description="CyberSentinel EDR")
+    parser.add_argument("--daemon", help="Run strictly in the background monitoring a specific folder.", type=str, metavar="PATH")
+    # NEW ENTERPRISE FLEET COMMAND
+    parser.add_argument("--sync", help="Pull enterprise threat intel hashes from a central URL.", type=str, metavar="URL")
+    args = parser.parse_args()
+
+    if args.sync:
+        print(f"[*] Initiating Fleet Sync from: {args.sync}")
+        try:
+            import requests
+            response = requests.get(args.sync, timeout=10)
+            if response.status_code == 200:
+                hashes = response.text.splitlines()
+                count = 0
+                for h in hashes:
+                    h = h.strip()
+                    if len(h) == 64: # Valid SHA256
+                        # Inject directly into the SQLite Cache!
+                        utils.save_cached_result(h, "CRITICAL RISK") 
+                        count += 1
+                print(f"[+] Fleet Sync Complete: {count} enterprise threat signatures added to local DB.")
+            else:
+                print("[-] Sync failed: Server returned non-200 status.")
+        except Exception as e:
+            print(f"[-] Network Error during sync: {e}")
+            
+    elif args.daemon:
+        from modules.daemon_monitor import start_daemon
+        start_daemon(args.daemon)
     else:
-        print("[!] No internet connection. VirusTotal will be disabled.")
-    
-    app = CyberSentinelUI()
-    app.run()
+        app = CyberSentinelUI()
+        app.run()
