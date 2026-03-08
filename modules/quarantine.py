@@ -8,8 +8,8 @@ def quarantine_file(file_path, quarantine_dir="./quarantine_zone"):
     """
     if not os.path.exists(quarantine_dir):
         os.makedirs(quarantine_dir)
-        # Optional: Hide the folder in Windows so users don't poke around
-        # os.system(f'attrib +h "{quarantine_dir}"')
+        #Hide the folder in Windows so users don't poke around
+        os.system(f'attrib +h "{quarantine_dir}"')
 
     try:
         filename = os.path.basename(file_path)
