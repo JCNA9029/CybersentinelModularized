@@ -35,7 +35,9 @@ pip install -r requirements.txt
 
 To utilize the offline Machine Learning capabilities, install the EMBER2024 `thrember` feature extractor directly from its source repository:
 
-pip install git+https://github.com/FutureComputing4AI/EMBER2024.git
+git clone https://github.com/FutureComputing4AI/EMBER2024.git
+cd EMBER2024/
+pip install .
 
 **4. Download the Local Machine Learning Models**
 
