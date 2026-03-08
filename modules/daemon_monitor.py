@@ -19,7 +19,7 @@ class ThreatHandler(FileSystemEventHandler):
             except Exception as e:
                 pass
 
-# --- 2. THE NEW ENTERPRISE WMI HOOK ---
+# --- 2. WMI HOOK ---
 def monitor_process_execution(logic_instance):
     """Hooks into Windows WMI to catch processes the millisecond they execute."""
     try:
@@ -41,8 +41,12 @@ def monitor_process_execution(logic_instance):
                 try:
                     logic_instance.scan_file(exe_path)
                 except Exception as e:
-                    # Optional: Print a tiny warning instead of failing completely silently
+                    # Print a tiny warning instead of failing completely silently
                     print(f"[-] Scanner bypassed {new_process.Name} (Likely locked by OS permissions)")
+                    
+    # THIS is the line that accidentally got deleted!
+    except Exception as e:
+        print(f"[-] WMI Hook Failed: {e}")
 
 # --- 3. The Dual-Threaded Starter ---
 def start_daemon(target_dir):
