@@ -1,71 +1,86 @@
-# CyberSentinel: Multi-Tiered Malware Analysis Framework (UNDER CONSTRUCTION)
+# CyberSentinel: 5-Tiered Enterprise EDR & Malware Analysis Framework
 
-CyberSentinel is an automated, multi-layered malware analysis CLI tool designed to identify and explain potential threats using collective intelligence, local machine learning, and generative AI.
+CyberSentinel is an automated, multi-layered Endpoint Detection and Response (EDR) framework built entirely in Python. Designed for under-resourced Security Operations Centers (SOCs) and IT teams, it democratizes enterprise-grade threat intelligence by combining WMI kernel-bridge monitoring, aggregated multi-cloud consensus, offline machine learning, generative AI interpretation, and automated network containment into a single, lightweight command-line utility.
 
-## 🛡️ System Architecture
-This tool employs a three-tiered detection strategy:
-* **Tier 1 (Cloud Intelligence):** Queries the VirusTotal API to check file hashes against global antivirus engines.
-* **Tier 2 (Local Machine Learning):** Extracts Portable Executable (PE) features using `thrember` and analyzes them against a LightGBM model trained on the EMBER2024 dataset. Automatically bypasses files over 50MB to preserve system resources.
-* **Tier 3 (AI Analyst Interpretation):** Utilizes a local Ollama LLM (`llama3:8b`) to generate human-readable threat reports and mitigation strategies based on identified malware families and imported APIs.
+## 🛡️ Enterprise System Architecture
+This tool abandons the concept of "single point of failure" scanning. It employs a persistent, 5-tiered detection and mitigation strategy:
+
+* **Tier 0 (Real-Time Intercept):** An autonomous background daemon hooks directly into the Windows Management Instrumentation (WMI) kernel-bridge to intercept and scan processes the exact millisecond they execute in RAM.
+* **Tier 1 (Multi-Cloud Consensus):** A Threat Intelligence Multiplexer simultaneously queries a "Smart Consensus" of four global engines (VirusTotal, AlienVault OTX, MetaDefender, and MalwareBazaar) to establish an immediate, zero-trust verdict.
+* **Tier 2 (Local Machine Learning):** Extracts Portable Executable (PE) features using `thrember` and analyzes them against a local LightGBM model trained on the EMBER2024 dataset to detect zero-day anomalies without an internet connection.
+* **Tier 3 (AI Analyst Interpretation):** Utilizes a locally hosted Ollama LLM (`qwen2.5:3b`) to translate complex behavioral metadata and API calls into human-readable triage reports and actionable YARA rules.
+* **Tier 4 (Automated Containment):** Instantly modifies Windows Firewall rules to sever outbound Command and Control (C2) traffic while concurrently dispatching hardware-encrypted JSON telemetry payloads to a SOC Webhook.
 
 ## ⚙️ Prerequisites
-To run this program locally, you must have the following installed:
-1. [Python 3.8+](https://www.python.org/downloads/)
-2. [Ollama Desktop](https://ollama.com/) (Required for the Tier 3 AI Analyst)
+To run this framework locally, ensure the following are installed and configured:
+1. **[Python 3.8+](https://www.python.org/downloads/)** (Must be added to system PATH).
+2. **[Ollama](https://ollama.com/)** (Required for the Tier 3 Generative AI Analyst).
+3. **API Credentials:** You will need free API keys for [VirusTotal](https://www.virustotal.com/), [AlienVault OTX](https://otx.alienvault.com/), [MetaDefender](https://metadefender.opswat.com/), and an Auth-Key from [MalwareBazaar](https://auth.abuse.ch/).
 
 ## 🚀 Installation & Setup
 
 **1. Clone the repository**
-
-git clone [https://github.com/JCNA9029/CybersentinelModularized.git](https://github.com/JCNA9029/CybersentinelModularized.git)
-
+git clone https://github.com/JCNA9029/CybersentinelModularized.git
 cd CybersentinelModularized
 
-**2. Install Python dependencies**
-
+**2. Install Core Python Dependencies**
+The easiest way to configure your environment is to double-click the included install.bat file. Alternatively, you can install the complete dependency tree manually using: 
 pip install -r requirements.txt
 
-If you can't install thrember, you can
+**3. Install the Feature Extractor (Thrember)**
+To utilize the offline Machine Learning capabilities, install the EMBER2024 `thrember` feature extractor directly from its source repository:
+pip install git+https://github.com/FutureComputing4AI/EMBER2024.git
 
-OPTION 1:
+**4. Download the Local Machine Learning Models**
+Due to GitHub repository size limitations, the compiled LightGBM models are hosted externally. 
+* Download the EMBER2024 models from [THIS GOOGLE DRIVE LINK](https://drive.google.com/drive/folders/1dtVVH4Oo5RhoAiMPhqsB4T1X2dGX0v5N?usp=drive_link).
+* Place the entire `models/` directory directly into your root `CybersentinelModularized/` folder.
 
-1. Download the zip file in [EMBER2024](https://github.com/FutureComputing4AI/EMBER2024)
-2. Unzip and install it
-
-OPTION 2:
-1. Use git and type "pip install git+https://github.com/FutureComputing4AI/EMBER2024.git"
-2. Type "pip install -r requirements.txt" in cmd again
-
-**3. Initialize the AI Analyst (Ollama)**
-
-Install ollama using cmd 
-
+**5. Initialize the AI Analyst**
+Install Ollama via the Windows command line, ensure it is running in the background, and pull the required Qwen model:
 winget install -e --id Ollama.Ollama
-
-Ensure the Ollama desktop app is running in the background, then pull the required model:
-
 ollama run qwen2.5:3b
 
-*(Note: If the models/ directory is not included in this repository due to size limits, please download the EMBER2024 models from [HERE](https://drive.google.com/drive/folders/1dtVVH4Oo5RhoAiMPhqsB4T1X2dGX0v5N?usp=drive_link) and place it in the root directory).*
+## 💻 Usage Instructions
 
-## 💻 Usage
-Run the main interface from your terminal:
-**python CyberSentinel2026.py**
+CyberSentinel features a dynamic architecture with three distinct operational modes.
 
-On the first boot, the program will prompt you for a VirusTotal API key. This key will be encrypted via XOR/Base64 and stored locally in a config.json file for future sessions.
+### Mode 1: Interactive Triage (Standard CLI)
+Launch the interactive terminal. This mode features "Smart Input Routing"—simply drag and drop a single file, an entire batch directory, a raw hash, or a `.txt` file full of IOCs, and the framework will automatically route it to the correct scanning pipeline.
+
+python CyberSentinel.py
+
+*(Note: On first boot, navigate to Option 5 (Settings) to input your API keys and Discord SOC Webhook URL. These are encrypted locally via a hardware-bound XOR/Base64 cipher.)*
+
+### Mode 2: Enterprise Daemon (Real-Time Protection)
+Deploy CyberSentinel as an autonomous background agent. It actively hooks into Windows WMI to monitor process creation and watches a specified directory for dropped files. Threats are auto-quarantined and the network is isolated instantly.
+*(Must be run as **Administrator** to allow WMI hooking and Network Containment.)*
+
+python CyberSentinel.py --daemon C:\Path\To\Your\Directory
+
+### Mode 3: Fleet Intelligence Sync
+Pull enterprise threat intel hashes (Indicators of Compromise) from a central company server or text file URL and inject them directly into your local offline SQLite cache.
+
+python CyberSentinel.py --sync https://your-company-server.com/latest_threats.txt
+
+### 🛡️ High-Availability / Anti-Tamper Mode
+To run the daemon with survivability protections, right-click **`TamperGuard.bat`** and select **Run as Administrator**. If advanced malware attempts to terminate the Python process, the out-of-process heartbeat monitor will instantly resurrect the EDR.
 
 ## 📂 Project Structure
-CyberSentinel2026.py - Main CLI interface and entry point.
+* `CyberSentinel.py` - Main CLI interface, smart routing logic, and argument parser.
+* `install.bat` / `TamperGuard.bat` - Deployment and survivability scripts.
+* `exclusions.txt` - Enterprise allowlist for authorized business applications (auto-generated).
+* `modules/` - Core logic package containing:
+  * `analysis_manager.py` - Threat detection routing and pipeline execution.
+  * `additional_apis.py` / `virustotal_api.py` - Tier 1 Cloud Intelligence wrappers.
+  * `daemon_monitor.py` - WMI kernel-bridge and directory watchdog threads.
+  * `network_isolation.py` - Automated firewall containment protocols.
+  * `ml_engine.py` - Feature extraction and LightGBM model execution.
+  * `live_edr.py` - Live memory triage and process mapping.
+  * `utils.py` - SQLite caching, hardware cryptography, and webhooks.
 
-modules/ - Core logic package containing:
-
-analysis_manager.py - Threat detection routing, API calls, and report generation.
-
-ml_engine.py - Feature extraction and LightGBM model execution.
-
-utils.py - Configuration management and cryptography.
-
-loading.py - Terminal UI elements.
+## ⚠️ Disclaimer
+CyberSentinel dynamically modifies the Windows Firewall during containment events and interacts deeply with active system memory. It is strictly recommended to test this framework in a sandboxed environment or virtual machine before deploying it to production corporate assets.
 
 ## 📞 Contact 
-If found any problems contact me on Discord: @JCNA9029 
+For project inquiries, architecture discussions, or bug reports, contact me on Discord: **@JCNA9029**
