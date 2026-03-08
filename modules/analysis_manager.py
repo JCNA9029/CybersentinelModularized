@@ -1,3 +1,6 @@
+# This is the core analysis manager that orchestrates the entire multi-tiered scanning pipeline. 
+# It handles the logic for routing files through cloud intelligence, local ML analysis, and LLM report generation. 
+# It also manages session logging and interacts with the quarantine and network isolation modules when threats are detected.
 import os
 import datetime
 import ollama
@@ -84,26 +87,35 @@ class ScannerLogic:
     def scan_file(self, file_path: str):
         """Main routing pipeline for physical file scans."""
         
-        # SECURITY FIX: Prevent TOCTOU (Time-of-Check to Time-of-Use) Race Conditions
-        if not os.path.exists(file_path):
-            return
-
+        # --- TIER 00: ENTERPRISE EXCLUSION LIST ---
         if utils.is_excluded(file_path):
             self.log_event(f"[*] ALLOWLISTED: {os.path.basename(file_path)} bypassed scanning per enterprise policy.")
             return
 
         sha256 = utils.get_sha256(file_path)
         if not sha256:
-            print("[-] Extraction Fault: Target file could not be read or was locked by the OS.")
+            print("[-] Extraction Fault: Target file could not be read.")
+            return
+
+        malicious_sources = [] 
+
+        # --- UI FIX: Print the Banner BEFORE checking the cache ---
+        self.log_event("-" * 60)
+        self.log_event(f"[*] Target File: {os.path.basename(file_path)}")
+        self.log_event(f"[*] Target SHA-256: {sha256}")
+        
+        # --- TIER 0.5: LOCAL THREAT CACHE (API PROTECTION) ---
+        cached = utils.get_cached_result(sha256)
+        if cached:
+            self.log_event(f"[*] CACHE HIT: Local DB indicates {cached['verdict']} (Skipping API calls)")
             return
         
-        malicious_sources = []
-
         try:
-            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            file_size_mb = os.path.getsize(file_path) / (1024 * 1024) 
         except OSError:
             print("[-] IO Error: File was moved or deleted before size calculation.")
             return
+        
 
         self.log_event("-" * 60)
         self.log_event(f"[*] Target File: {os.path.basename(file_path)}")
@@ -214,7 +226,7 @@ class ScannerLogic:
         # 3. Handle the Final Result
         if cloud_result:
             verdict = cloud_result['verdict']
-            utils.save_cached_result(sha256, verdict)
+            utils.save_cached_result(sha256, verdict, os.path.basename(file_path))
             
             if verdict == "MALICIOUS":
                 self._prompt_quarantine(file_path, sha256, threat_source, verdict)
@@ -236,7 +248,7 @@ class ScannerLogic:
 
         verdict = ml_result['verdict']
         self.log_event(f"[*] Local ML Verdict: {verdict} (Confidence: {ml_result['score']:.2%})")
-        utils.save_cached_result(sha256, verdict)
+        utils.save_cached_result(sha256, verdict, os.path.basename(file_path))
             
         if verdict == "CRITICAL RISK":
             self._handle_critical_ml_threat(file_path, sha256, file_size_mb, ml_result)
@@ -304,7 +316,7 @@ class ScannerLogic:
             self.log_event("\n[+] FINAL VERDICT: SAFE (All responding engines clean)")
             
         # Save to local database for future offline scans
-        utils.save_cached_result(file_hash, final_verdict)
+        utils.save_cached_result(file_hash, final_verdict, "Manual Hash")
 
     def _handle_critical_ml_threat(self, file_path, sha256, file_size_mb, ml_result):
         """Isolates the complex LLM routing logic for Critical Threats."""
@@ -386,22 +398,34 @@ class ScannerLogic:
         print("\n" + "="*50)
         ans = input("[?] Would you like to save these results to a forensic .txt log? (Y/N): ").strip().lower()
         if ans == 'y':
-            filename = input("[>] Enter filename (e.g., my_report): ").strip() or "scan_results"
-            if not filename.endswith('.txt'): filename += '.txt'
-
-            # Creates Analysis Folder if it doesn't exist yet
             analysis_dir = "Analysis Files"
             if not os.path.exists(analysis_dir):
                 os.makedirs(analysis_dir)
                 
-            filepath = os.path.join(analysis_dir, filename)
-            
-            try:
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write("="*60 + "\n CYBERSENTINEL SCAN REPORT\n")
-                    f.write(f" Generated: {datetime.datetime.now()}\n" + "="*60 + "\n")
-                    f.write("\n".join(self.session_log))
-                    f.write("\n" + "="*60 + "\n END OF REPORT\n" + "="*60 + "\n")
-                print(f"[+] Success! File saved as: {os.path.abspath(filepath)}")
-            except Exception as e:
-                print(f"[-] Save Error: {e}")
+            # Use a while loop to let the user try again if they don't want to overwrite
+            while True:
+                filename = input("[>] Enter filename (e.g., my_report): ").strip() or "scan_results"
+                if not filename.endswith('.txt'): 
+                    filename += '.txt'
+                
+                filepath = os.path.join(analysis_dir, filename)
+                
+                # --- QoL UPDATE: File Overwrite Protection ---
+                if os.path.exists(filepath):
+                    overwrite = input(f"\n[!] WARNING: '{filename}' already exists. Overwrite? (Y/N): ").strip().lower()
+                    if overwrite != 'y':
+                        print("[*] Save aborted. Please enter a different filename.")
+                        continue # Loops back to the 'Enter filename' prompt
+                # ---------------------------------------------
+                
+                try:
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        f.write("="*60 + "\n CYBERSENTINEL SCAN REPORT\n")
+                        f.write(f" Generated: {datetime.datetime.now()}\n" + "="*60 + "\n")
+                        f.write("\n".join(self.session_log))
+                        f.write("\n" + "="*60 + "\n END OF REPORT\n" + "="*60 + "\n")
+                    print(f"\n[+] Success! File saved as: {os.path.abspath(filepath)}")
+                    break # Exits the loop after a successful save
+                except Exception as e:
+                    print(f"[-] Save Error: {e}")
+                    break # Exits the loop if the OS throws a write error

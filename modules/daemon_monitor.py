@@ -1,3 +1,7 @@
+# This is the daemon monitor that runs in the background, watching for new files in a specified directory and hooking into Windows WMI to catch process executions.
+# It uses the ScannerLogic from analysis_manager to scan any new files or processes it detects. 
+# This allows for real-time monitoring and protection against threats as they appear on the system.
+
 import os
 import time
 import threading
@@ -44,7 +48,6 @@ def monitor_process_execution(logic_instance):
                     # Print a tiny warning instead of failing completely silently
                     print(f"[-] Scanner bypassed {new_process.Name} (Likely locked by OS permissions)")
                     
-    # THIS is the line that accidentally got deleted!
     except Exception as e:
         print(f"[-] WMI Hook Failed: {e}")
 

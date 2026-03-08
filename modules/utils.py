@@ -1,3 +1,6 @@
+# This utility module provides core functions for encryption, configuration management, webhook alerts, internet connectivity checks, 
+# file hashing, path sanitization, and local SQLite database management for caching scan results.
+# It ensures that sensitive information like API keys are securely stored and that the EDR operates efficiently.
 import hashlib
 import socket
 import json 
@@ -141,18 +144,31 @@ def sanitize_path(path: str) -> str:
 def init_db():
     """Initializes the SQLite schema with safe memory contexts."""
     try:
-        # 'with' handles safe opening and automatic transaction commits
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS scan_cache (
                     sha256 TEXT PRIMARY KEY,
+                    filename TEXT,  -- NEW COLUMN
                     verdict TEXT,
                     timestamp TEXT
                 )
             ''')
     except sqlite3.Error as e:
         print(f"[-] Threat Cache Initialization Failed: {e}")
+
+def save_cached_result(sha256: str, verdict: str, filename: str = "Unknown"):
+    """Commits an analytical verdict to the local SQLite database."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute('''
+                INSERT OR REPLACE INTO scan_cache (sha256, filename, verdict, timestamp)
+                VALUES (?, ?, ?, ?)
+            ''', (sha256, filename, verdict, now))
+    except sqlite3.Error:
+        pass
 
 def get_cached_result(sha256: str) -> dict:
     """Executes an O(1) index lookup against the local threat cache."""
@@ -167,19 +183,6 @@ def get_cached_result(sha256: str) -> dict:
     except sqlite3.Error:
         pass
     return None
-
-def save_cached_result(sha256: str, verdict: str):
-    """Commits an analytical verdict to the local SQLite database."""
-    try:
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cursor.execute('''
-                INSERT OR REPLACE INTO scan_cache (sha256, verdict, timestamp)
-                VALUES (?, ?, ?)
-            ''', (sha256, verdict, now))
-    except sqlite3.Error:
-        pass
 
 def is_excluded(file_path: str) -> bool:
     """

@@ -1,9 +1,12 @@
+# The Main UI of the Program
+# Handles the user interface, input validation, and routes commands to the ScannerLogic module. 
+# Also manages API key configuration and session logging.
 import argparse
 import os
-import sys
-import time
+import ctypes
+import tkinter as tk
+from tkinter import filedialog
 from modules import ScannerLogic, utils
-from modules.scanner_api import VirusTotalAPI
 from modules.live_edr import get_target_process_path
 from modules.network_isolation import restore_network
 
@@ -78,6 +81,32 @@ class CyberSentinelUI:
         utils.save_config(self.logic.api_keys, self.logic.webhook_url)
         print("[+] Global Configuration updated successfully.")
 
+    def _menu_view_cache(self):
+        """Dumps the local SQLite threat cache to the terminal."""
+        print("\n--- Local Threat Intelligence Cache ---")
+        try:
+            import sqlite3
+            with sqlite3.connect("threat_cache.db") as conn:
+                cursor = conn.cursor()
+                # Added filename to the SELECT query
+                cursor.execute("SELECT sha256, filename, verdict, timestamp FROM scan_cache")
+                rows = cursor.fetchall()
+                
+                if not rows:
+                    print("[*] The cache is currently empty.")
+                    return
+                
+                # Expanded table formatting to fit the file name
+                print(f"{'SHA-256 Hash':<64} | {'File Name':<20} | {'Verdict':<15} | {'Timestamp'}")
+                print("-" * 130)
+                for row in rows:
+                    # Truncate the filename if it's too long to prevent breaking the table layout
+                    fname = (row[1][:17] + '...') if len(row[1]) > 20 else row[1]
+                    print(f"{row[0]:<64} | {fname:<20} | {row[2]:<15} | {row[3]}")
+                    
+        except sqlite3.Error as e:
+            print(f"[-] Database Error: {e}")
+
     def _continuous_loop(self, action_func, prompt_msg):
         """Helper abstraction to keep the user in a continuous workflow."""
         while True:
@@ -86,30 +115,42 @@ class CyberSentinelUI:
                 break
 
     def _menu_analyze_path(self):
-            """Intelligently handles both single files and batch directory scans."""
-            path = input("\nDrag and drop a file or folder to scan (or press Enter to cancel): ").strip().strip('"').strip("'")
-            
-            if not path:
+        """Prompts the user for a target and initiates the scan."""
+        print("\n" + "="*50)
+        print("[*] Note: If running as Administrator, drag-and-drop is blocked by Windows UIPI.")
+        
+        # QoL Update: Prompt tailored for Admin bypass
+        target = input("Drag and drop a file to scan (or press Enter to open File Explorer): ").strip()
+        
+        # Strip the hidden quotes that Windows wraps around dragged files
+        target = target.strip('\"').strip('\'')
+        
+        if not target:
+            # --- ELEVATION CHECK: Ask the Windows API if we are Admin ---
+            try:
+                is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+            except AttributeError:
+                is_admin = False
+                
+            if is_admin:
+                print("[*] Administrator mode detected. Launching UIPI File Bypass...")
+                root = tk.Tk()
+                root.withdraw() # Hide the ugly empty root window
+                root.attributes('-topmost', True) # Force the dialog to the front of the screen
+                
+                # Spawn the native Windows file picker
+                target = filedialog.askopenfilename(title="CyberSentinel: Select File to Scan")
+                
+                if not target:
+                    print("[-] File selection cancelled.")
+                    return
+            else:
+                # If they aren't an admin and just pressed Enter, cancel out.
+                print("[-] Scan cancelled.")
                 return
-                
-            if not os.path.exists(path):
-                print("[-] Error: Path does not exist.")
-                return
-                
-            # SMART ROUTING: If it's a single file, just scan it.
-            if os.path.isfile(path):
-                self.logic.scan_file(path)
-                
-            # SMART ROUTING: If it's a folder, run the batch loop.
-            elif os.path.isdir(path):
-                print(f"\n[*] Initiating Batch Scan on directory: {path}")
-                for root, _, files in os.walk(path):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        print("\n" + "="*50)
-                        self.logic.scan_file(file_path)
-                print(f"\n[+] Batch Scan Complete for: {path}")
 
+        # Pass the cleanly acquired path to your routing manager
+        self.logic.scan_file(target)
     def _menu_analyze_hash(self):
         """Intelligently handles both single hashes and batch .txt files."""
         user_input = input("\nPaste a Hash OR drag a .txt file (or press Enter to cancel): ").strip().strip('"').strip("'")
@@ -164,9 +205,10 @@ class CyberSentinelUI:
             print("3. Scan Active Memory (Live EDR)")
             print("4. Network Containment Management")
             print("5. Settings & Configuration")
-            print("6. Exit")
+            print("6. View Local Threat Cache")
+            print("7. Exit")
             
-            choice = input("\nSelect an option (1-6): ").strip()
+            choice = input("\nSelect an option (1-7): ").strip()
 
             if choice == '1':
                 self._continuous_loop(self._menu_analyze_path, "Analyze another path?")
@@ -180,11 +222,13 @@ class CyberSentinelUI:
             elif choice == '5':
                 self.update_settings()
             elif choice == '6':
+                self._menu_view_cache()
+            elif choice == '7':
                 self.logic.save_session_log()
                 print("[*] Exiting CyberSentinel...")
                 break
             else:
-                print("[-] Invalid choice. Please select 1-6.")
+                print("[-] Invalid choice. Please select 1-7.")
                 
 if __name__ == "__main__":
     import argparse

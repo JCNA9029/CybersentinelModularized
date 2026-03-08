@@ -1,3 +1,6 @@
+# This module handles network isolation by modifying Windows Firewall rules.
+# It provides functions to block all inbound and outbound traffic to contain threats such as C2C , as well as a
+# restore function to revert the firewall back to its default state. 
 import subprocess
 import ctypes
 import os

@@ -1,3 +1,6 @@
+# This module provides a secure quarantine mechanism for handling malicious files detected by the CyberSentinel program.
+# When a threat is detected, the quarantine_file function can be called to safely move the file
+# to a hidden quarantine directory and neutralize it by changing its extension.
 import os
 import shutil
 

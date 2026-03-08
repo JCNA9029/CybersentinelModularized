@@ -1,3 +1,5 @@
+# This module contains the API wrapper classes for the Tier 1 Cloud Intelligence services: VirusTotal, AlienVault OTX, MetaDefender, and MalwareBazaar.
+# Each class provides a standardized get_report method that returns a consistent dictionary format for the Consensus Engine
 import requests
 from requests.exceptions import Timeout, RequestException
 

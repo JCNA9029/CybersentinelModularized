@@ -1,3 +1,6 @@
+# This is the local machine learning engine that performs offline analysis of files using pre-trained LightGBM models. 
+# It extracts PE features using the thrember library, applies ML inference to determine if a
+# file is malicious, and identifies the malware family if a threat is detected. It also parses the Import Address Table (IAT) for forensic analysis.
 import json
 import os
 import numpy as np

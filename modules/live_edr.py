@@ -1,3 +1,5 @@
+# This is the live EDR module that allows users to scan active processes in memory. 
+# It enumerates active processes, filters out system binaries, and allows the user to select a process to scan.
 import os
 import psutil
 

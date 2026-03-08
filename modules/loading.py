@@ -1,3 +1,4 @@
+# This is a simple loading spinner that can be used to indicate progress during long-running operations.
 import sys
 import time
 import threading
