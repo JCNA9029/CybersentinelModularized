@@ -7,4 +7,6 @@ lightgbm
 numpy
 ollama
 watchdog
-git+https://github.com/FutureComputing4AI/EMBER2024.git
+pefile==2024.8.26
+signify==0.7.1
+thrember
