@@ -7,9 +7,10 @@ import binascii
 import uuid
 import sqlite3  
 import datetime
+import requests  # Optimization: Moved to the top of the file
 
 CONFIG_FILE = "config.json"
-DB_FILE = "threat_cache.db" 
+DB_FILE = "threat_cache.db"
 
 def get_machine_key() -> bytes:
     """
@@ -36,7 +37,7 @@ def decrypt_key(encrypted_key: str) -> str:
         return ""
     try:
         enc_bytes = base64.b64decode(encrypted_key)
-        dynamic_key = get_machine_key() 
+        dynamic_key = get_machine_key()
         
         xored = bytes(a ^ b for a, b in zip(enc_bytes, dynamic_key * (len(enc_bytes) // len(dynamic_key) + 1)))
         return xored.decode('utf-8')
@@ -62,7 +63,7 @@ def load_config() -> dict:
                 
                 # Decrypt all saved keys
                 config_data["api_keys"] = {k: decrypt_key(v) for k, v in keys.items() if v}
-                config_data["webhook_url"] = decrypt_key(data.get("webhook_url", "")) 
+                config_data["webhook_url"] = decrypt_key(data.get("webhook_url", ""))
         except Exception:
             pass
     return config_data
@@ -84,26 +85,26 @@ def save_config(api_keys: dict, webhook_url: str = "") -> bool:
 
 def send_webhook_alert(webhook_url: str, title: str, details: dict):
     """
-    Transmits a lightweight JSON payload to a SOC webhook (e.g., Slack, Discord).
-    Operates with a strict 3-second timeout to prevent scanner latency.
+    Transmits a JSON payload to a SOC webhook (e.g., Slack, Discord).
+    Production Mode: Fails gracefully without interrupting the EDR pipeline.
     """
     if not webhook_url:
-        return
+        return # Silently skip if the user hasn't set up a webhook
         
     payload = {
         "content": f"🚨 **CYBERSENTINEL ALERT: {title}** 🚨",
         "embeds": [{
             "title": "Automated Threat Intelligence Report",
-            "color": 16711680, # Hex code for Red
+            "color": 16711680, # Red
             "fields": [{"name": str(k), "value": str(v), "inline": False} for k, v in details.items()]
         }]
     }
     
     try:
-        import requests
+        # Strict 3-second timeout so the malware scanner doesn't hang waiting on Discord
         requests.post(webhook_url, json=payload, timeout=3)
     except Exception:
-        pass # Silent fail to ensure the local EDR pipeline is not interrupted
+        pass # Enterprise silent failure: keep the EDR running at all costs!
     
 def check_internet(host="8.8.8.8", port=53, timeout=3) -> bool:
     """Pings Google's DNS to verify active external network routing."""
@@ -179,29 +180,6 @@ def save_cached_result(sha256: str, verdict: str):
             ''', (sha256, verdict, now))
     except sqlite3.Error:
         pass
-def send_webhook_alert(webhook_url: str, title: str, details: dict):
-    """
-    Transmits a JSON payload to a SOC webhook (e.g., Slack, Discord).
-    Production Mode: Fails gracefully without interrupting the EDR pipeline.
-    """
-    if not webhook_url:
-        return # Silently skip if the user hasn't set up a webhook
-        
-    payload = {
-        "content": f"🚨 **CYBERSENTINEL ALERT: {title}** 🚨",
-        "embeds": [{
-            "title": "Automated Threat Intelligence Report",
-            "color": 16711680, # Red
-            "fields": [{"name": str(k), "value": str(v), "inline": False} for k, v in details.items()]
-        }]
-    }
-    
-    try:
-        import requests
-        # Strict 3-second timeout so the malware scanner doesn't hang waiting on Discord
-        requests.post(webhook_url, json=payload, timeout=3)
-    except Exception:
-        pass # Enterprise silent failure: keep the EDR running at all costs!
 
 def is_excluded(file_path: str) -> bool:
     """

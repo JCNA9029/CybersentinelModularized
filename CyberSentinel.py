@@ -3,7 +3,7 @@ import os
 import sys
 import time
 from modules import ScannerLogic, utils
-from modules.virustotal_api import VirusTotalAPI
+from modules.scanner_api import VirusTotalAPI
 from modules.live_edr import get_target_process_path
 from modules.network_isolation import restore_network
 

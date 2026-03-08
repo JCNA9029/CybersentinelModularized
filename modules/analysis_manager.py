@@ -1,12 +1,10 @@
 import os
-import sys
 import datetime
 import ollama
 from .loading import Spinner
 from .quarantine import quarantine_file
 from .ml_engine import LocalScanner
-from .virustotal_api import VirusTotalAPI
-from .additional_apis import AlienVaultAPI, MetaDefenderAPI, MalwareBazaarAPI
+from .scanner_api import VirusTotalAPI, AlienVaultAPI, MetaDefenderAPI, MalwareBazaarAPI
 from . import network_isolation
 from . import utils
 
@@ -98,6 +96,8 @@ class ScannerLogic:
         if not sha256:
             print("[-] Extraction Fault: Target file could not be read or was locked by the OS.")
             return
+        
+        malicious_sources = []
 
         try:
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
@@ -135,67 +135,78 @@ class ScannerLogic:
         if selected_engine == 'consensus':
             self.log_event("[*] Running Smart Consensus across all active APIs...")
             malicious_sources = []
-            
-           # Query 1: MalwareBazaar
-        if self.api_keys.get("malwarebazaar"):
-            mb_res = MalwareBazaarAPI(self.api_keys["malwarebazaar"]).get_report(sha256)
-            if mb_res:
-                self.log_event(f"    -> MalwareBazaar: {mb_res['verdict']} (Hits: {mb_res.get('engines_detected', 0)})")
-                if mb_res['verdict'] == 'MALICIOUS': malicious_sources.append("MalwareBazaar")
-            else:
-                self.log_event("    -> MalwareBazaar: UNKNOWN (Not found in database)")
-
-        # Query 2: VirusTotal
-        if self.api_keys.get("virustotal"):
-            vt_res = VirusTotalAPI(self.api_keys["virustotal"]).get_report(sha256)
-            if vt_res:
-                self.log_event(f"    -> VirusTotal: {vt_res['verdict']} (Hits: {vt_res.get('engines_detected', 0)})")
-                if vt_res['verdict'] == 'MALICIOUS': malicious_sources.append("VirusTotal")
-            else:
-                self.log_event("    -> VirusTotal: UNKNOWN (Not found in database)")
-
-        # Query 3: AlienVault OTX
-        if self.api_keys.get("alienvault"):
-            otx_res = AlienVaultAPI(self.api_keys["alienvault"]).get_report(sha256)
-            if otx_res:
-                self.log_event(f"    -> AlienVault OTX: {otx_res['verdict']} (Hits: {otx_res.get('engines_detected', 0)})")
-                if otx_res['verdict'] == 'MALICIOUS': malicious_sources.append("AlienVault")
-            else:
-                self.log_event("    -> AlienVault OTX: UNKNOWN (Not found in database)")
-
-        # Query 4: MetaDefender
-        if self.api_keys.get("metadefender"):
-            md_res = MetaDefenderAPI(self.api_keys["metadefender"]).get_report(sha256)
-            if md_res:
-                self.log_event(f"    -> MetaDefender: {md_res['verdict']} (Hits: {md_res.get('engines_detected', 0)})")
-                if md_res['verdict'] == 'MALICIOUS': malicious_sources.append("MetaDefender")
-            else:
-                self.log_event("    -> MetaDefender: UNKNOWN (Not found in database)")
-            # Evaluate Aggregated Consensus
-            if malicious_sources:
-                final_verdict = "MALICIOUS"
-                threat_source = f"Consensus ({', '.join(malicious_sources)})"
-            else:
-                final_verdict = "SAFE"
-                threat_source = "Consensus (All Clean)"
                 
-            cloud_result = {"verdict": final_verdict}
-            self.log_event(f"[*] FINAL AGGREGATED VERDICT: {final_verdict}")
+            # Query 1: MalwareBazaar
+            if self.api_keys.get("malwarebazaar"):
+                mb_res = MalwareBazaarAPI(self.api_keys["malwarebazaar"]).get_report(sha256)
+                if mb_res:
+                    self.log_event(f"    -> MalwareBazaar: {mb_res['verdict']} (Hits: {mb_res.get('engines_detected', 0)})")
+                    if mb_res['verdict'] == 'MALICIOUS': malicious_sources.append("MalwareBazaar")
+                else:
+                    self.log_event("    -> MalwareBazaar: UNKNOWN (Not found in database)")
+
+            # Query 2: VirusTotal
+            if self.api_keys.get("virustotal"):
+                vt_res = VirusTotalAPI(self.api_keys["virustotal"]).get_report(sha256)
+                if vt_res:
+                    self.log_event(f"    -> VirusTotal: {vt_res['verdict']} (Hits: {vt_res.get('engines_detected', 0)})")
+                    if vt_res['verdict'] == 'MALICIOUS': malicious_sources.append("VirusTotal")
+                else:
+                    self.log_event("    -> VirusTotal: UNKNOWN (Not found in database)")
+
+            # Query 3: AlienVault OTX
+            if self.api_keys.get("alienvault"):
+                otx_res = AlienVaultAPI(self.api_keys["alienvault"]).get_report(sha256)
+                if otx_res:
+                    self.log_event(f"    -> AlienVault OTX: {otx_res['verdict']} (Hits: {otx_res.get('engines_detected', 0)})")
+                    if otx_res['verdict'] == 'MALICIOUS': malicious_sources.append("AlienVault")
+                else:
+                    self.log_event("    -> AlienVault OTX: UNKNOWN (Not found in database)")
+
+            # Query 4: MetaDefender
+            if self.api_keys.get("metadefender"):
+                md_res = MetaDefenderAPI(self.api_keys["metadefender"]).get_report(sha256)
+                if md_res:
+                    self.log_event(f"    -> MetaDefender: {md_res['verdict']} (Hits: {md_res.get('engines_detected', 0)})")
+                    if md_res['verdict'] == 'MALICIOUS': malicious_sources.append("MetaDefender")
+                else:
+                    self.log_event("    -> MetaDefender: UNKNOWN (Not found in database)")
+                # Evaluate Aggregated Consensus
+                if malicious_sources:
+                    final_verdict = "MALICIOUS"
+                    threat_source = f"Consensus ({', '.join(malicious_sources)})"
+                else:
+                    final_verdict = "SAFE"
+                    threat_source = "Consensus (All Clean)"
+                    
+                cloud_result = {"verdict": final_verdict}
+                self.log_event(f"[*] FINAL AGGREGATED VERDICT: {final_verdict}")
 
         else:
             # --- Single API Mode (Bypassed if Consensus is chosen) ---
             if selected_engine == 'virustotal' and self.api_keys.get("virustotal"):
                 cloud_result = VirusTotalAPI(self.api_keys["virustotal"]).get_report(sha256)
                 threat_source = "VirusTotal"
+                if cloud_result and cloud_result['verdict'] == 'MALICIOUS':
+                    malicious_sources.append("VirusTotal")
+
             elif selected_engine == 'alienvault' and self.api_keys.get("alienvault"):
                 cloud_result = AlienVaultAPI(self.api_keys["alienvault"]).get_report(sha256)
                 threat_source = "AlienVault OTX"
+                if cloud_result and cloud_result['verdict'] == 'MALICIOUS':
+                    malicious_sources.append("AlienVault")
+
             elif selected_engine == 'metadefender' and self.api_keys.get("metadefender"):
                 cloud_result = MetaDefenderAPI(self.api_keys["metadefender"]).get_report(sha256)
                 threat_source = "MetaDefender"
+                if cloud_result and cloud_result['verdict'] == 'MALICIOUS':
+                    malicious_sources.append("MetaDefender")
+
             elif selected_engine == 'malwarebazaar' and self.api_keys.get("malwarebazaar"):
                 cloud_result = MalwareBazaarAPI(self.api_keys["malwarebazaar"]).get_report(sha256)
                 threat_source = "MalwareBazaar"
+                if cloud_result and cloud_result['verdict'] == 'MALICIOUS':
+                    malicious_sources.append("MalwareBazaar")
                 
             if cloud_result and selected_engine != 'consensus':
                 self.log_event(f"[*] CLOUD VERDICT ({threat_source}): {cloud_result['verdict']} (Hits: {cloud_result.get('engines_detected', 0)})")
