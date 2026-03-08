@@ -48,27 +48,32 @@ class LocalScanner:
             print(f"[-] Failed to load ML Model: {e}")
             return None
 
-    def extract_features(self, file_path):
+    def extract_features(self, file_path: str):
         """Utilizes thrember to map PE structural metadata into a float32 tensor."""
         supported_extensions = ('.exe', '.dll', '.sys', '.apk', '.elf', '.pdf')
         if not file_path.lower().endswith(supported_extensions):
             return None
             
+        file_data = None
         try:
             with open(file_path, 'rb') as f:
                 file_data = f.read()
             
             extractor = thrember.PEFeatureExtractor()
             features = np.array(extractor.feature_vector(file_data), dtype=np.float32)
-            del file_data # Explicitly free memory for large binaries
             return features.reshape(1, -1)
             
         except PermissionError:
             print("\n[!!!] CRITICAL WARNING: Permission Denied [!!!]")
             print("[-] The OS has locked this file. It is ACTIVELY RUNNING in memory.")
             return None
-        except Exception:
+        except Exception as e:
+            print(f"[-] Feature Extraction Error: {e}")
             return None
+        finally:
+            # MEMORY OPTIMIZATION: Guaranteed execution of Garbage Collection
+            if file_data is not None:
+                del file_data
         
     def get_suspicious_apis(self, file_path):
         """
