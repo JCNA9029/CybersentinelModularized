@@ -6,6 +6,7 @@ from .loading import Spinner
 from .quarantine import quarantine_file
 from .ml_engine import LocalScanner
 from .virustotal_api import VirusTotalAPI
+from .additional_apis import AlienVaultAPI, MetaDefenderAPI, MalwareBazaarAPI
 from . import network_isolation
 from . import utils
 
@@ -14,11 +15,11 @@ class ScannerLogic:
     
     def __init__(self):
         config = utils.load_config()
-        self.api_key = config.get("api_key", "")
+        self.api_keys = config.get("api_keys", {})
         self.webhook_url = config.get("webhook_url", "")
-        self.ml_scanner = LocalScanner()
+        self.ml_scanner = LocalScanner() 
         self.session_log = []
-        self.headless_mode = False # NEW: Tells the system if it's running as a daemon
+        self.headless_mode = False # Tells the system if it's running as a daemon
         utils.init_db()
         
     def log_event(self, message: str, print_to_screen=True):
@@ -27,11 +28,19 @@ class ScannerLogic:
             print(message)
         self.session_log.append(message)
 
-    def generate_llm_report(self, family_name, detected_apis, file_path, confidence_score, sha256, file_size_mb) -> str: 
+    def generate_llm_report(self, family_name: str, detected_apis: list, file_path: str, confidence_score: float, sha256: str, file_size_mb: float) -> str: 
         """Constructs semantic context and queries the Tier 3 Generative AI."""
-        api_context = "\n".join([f"- {api}" for api in detected_apis]) if detected_apis else "None extracted. Possible API hashing or packing utilized."
-        family_context = family_name + (" (Heuristic match. Focus on behavioral APIs.)" if "Family ID #" in family_name else "")
+        
+        # MEMORY OPTIMIZATION: Truncate API list to prevent LLM Token Overflow
+        max_apis = 50
+        if detected_apis:
+            api_context = "\n".join([f"- {api}" for api in detected_apis[:max_apis]])
+            if len(detected_apis) > max_apis:
+                api_context += f"\n- ... and {len(detected_apis) - max_apis} more mapped APIs."
+        else:
+            api_context = "None extracted. Possible API hashing or packing utilized."
 
+        family_context = family_name + (" (Heuristic match. Focus on behavioral APIs.)" if "Family ID #" in family_name else "")
         prompt = f"""
         [SYSTEM: EDR TRIAGE REPORT GENERATION]
         Target File: {os.path.basename(file_path)}
@@ -77,15 +86,23 @@ class ScannerLogic:
     def scan_file(self, file_path: str):
         """Main routing pipeline for physical file scans."""
         
-        # --- TIER 00: ENTERPRISE EXCLUSION LIST ---
-        # Stop immediately if the file is an authorized business application
+        # SECURITY FIX: Prevent TOCTOU (Time-of-Check to Time-of-Use) Race Conditions
+        if not os.path.exists(file_path):
+            return
+
         if utils.is_excluded(file_path):
             self.log_event(f"[*] ALLOWLISTED: {os.path.basename(file_path)} bypassed scanning per enterprise policy.")
             return
 
         sha256 = utils.get_sha256(file_path)
         if not sha256:
-            print("[-] Extraction Fault: Target file could not be read.")
+            print("[-] Extraction Fault: Target file could not be read or was locked by the OS.")
+            return
+
+        try:
+            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        except OSError:
+            print("[-] IO Error: File was moved or deleted before size calculation.")
             return
 
         self.log_event("-" * 60)
@@ -94,28 +111,105 @@ class ScannerLogic:
         
         file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
         
-        # --- TIER 1: CLOUD API ---
-        if self.api_key:
-            vt_api = VirusTotalAPI(self.api_key)
-            result = vt_api.query_hash(sha256)
+       # --- TIER 1: MULTI-CLOUD INTELLIGENCE ---
+        self.log_event("[*] Initializing Cloud Intelligence Routing...")
+        
+        # 1. Determine which engine to use
+        selected_engine = "consensus"
+        if not self.headless_mode:
+            print("\n[?] Select Cloud Intelligence Engine:")
+            print("1. VirusTotal")
+            print("2. AlienVault OTX")
+            print("3. MetaDefender")
+            print("4. MalwareBazaar (Open Access)")
+            print("5. Smart Consensus (Query all active APIs)")
+            choice = input("Select an option (1-5): ").strip()
             
-            if result["status"] == "CACHED":
-                self.log_event(f"[*] CACHE HIT: Local DB indicates {result['verdict']}")
-                if result["verdict"] in ["MALICIOUS", "CRITICAL RISK"]:
-                    self._prompt_quarantine(file_path, sha256, "VirusTotal Cloud API", result["verdict"])
-                return
-                
-            elif result["status"] == "SUCCESS":
-                self._format_vt_output(result["data"])
-                if result["verdict"] == "MALICIOUS":
-                    self.log_event("[!] Action Guidance: Cloud consensus confirms a known threat.")
-                    self._prompt_quarantine(file_path, sha256, "VirusTotal Cloud API", result["verdict"])
-                    return
-                elif result["verdict"] == "SAFE":
-                    self.log_event("[+] Action Guidance: Cloud confirms file is safe.")
-                    return
+            mapping = {'1': 'virustotal', '2': 'alienvault', '3': 'metadefender', '4': 'malwarebazaar', '5': 'consensus'}
+            selected_engine = mapping.get(choice, 'consensus')
+
+        # 2. Execute the query based on selection
+        cloud_result = None
+        threat_source = "Cloud Intelligence"
+
+        if selected_engine == 'consensus':
+            self.log_event("[*] Running Smart Consensus across all active APIs...")
+            malicious_sources = []
+            
+           # Query 1: MalwareBazaar
+        if self.api_keys.get("malwarebazaar"):
+            mb_res = MalwareBazaarAPI(self.api_keys["malwarebazaar"]).get_report(sha256)
+            if mb_res:
+                self.log_event(f"    -> MalwareBazaar: {mb_res['verdict']} (Hits: {mb_res.get('engines_detected', 0)})")
+                if mb_res['verdict'] == 'MALICIOUS': malicious_sources.append("MalwareBazaar")
             else:
-                self.log_event(result["message"])
+                self.log_event("    -> MalwareBazaar: UNKNOWN (Not found in database)")
+
+        # Query 2: VirusTotal
+        if self.api_keys.get("virustotal"):
+            vt_res = VirusTotalAPI(self.api_keys["virustotal"]).get_report(sha256)
+            if vt_res:
+                self.log_event(f"    -> VirusTotal: {vt_res['verdict']} (Hits: {vt_res.get('engines_detected', 0)})")
+                if vt_res['verdict'] == 'MALICIOUS': malicious_sources.append("VirusTotal")
+            else:
+                self.log_event("    -> VirusTotal: UNKNOWN (Not found in database)")
+
+        # Query 3: AlienVault OTX
+        if self.api_keys.get("alienvault"):
+            otx_res = AlienVaultAPI(self.api_keys["alienvault"]).get_report(sha256)
+            if otx_res:
+                self.log_event(f"    -> AlienVault OTX: {otx_res['verdict']} (Hits: {otx_res.get('engines_detected', 0)})")
+                if otx_res['verdict'] == 'MALICIOUS': malicious_sources.append("AlienVault")
+            else:
+                self.log_event("    -> AlienVault OTX: UNKNOWN (Not found in database)")
+
+        # Query 4: MetaDefender
+        if self.api_keys.get("metadefender"):
+            md_res = MetaDefenderAPI(self.api_keys["metadefender"]).get_report(sha256)
+            if md_res:
+                self.log_event(f"    -> MetaDefender: {md_res['verdict']} (Hits: {md_res.get('engines_detected', 0)})")
+                if md_res['verdict'] == 'MALICIOUS': malicious_sources.append("MetaDefender")
+            else:
+                self.log_event("    -> MetaDefender: UNKNOWN (Not found in database)")
+            # Evaluate Aggregated Consensus
+            if malicious_sources:
+                final_verdict = "MALICIOUS"
+                threat_source = f"Consensus ({', '.join(malicious_sources)})"
+            else:
+                final_verdict = "SAFE"
+                threat_source = "Consensus (All Clean)"
+                
+            cloud_result = {"verdict": final_verdict}
+            self.log_event(f"[*] FINAL AGGREGATED VERDICT: {final_verdict}")
+
+        else:
+            # --- Single API Mode (Bypassed if Consensus is chosen) ---
+            if selected_engine == 'virustotal' and self.api_keys.get("virustotal"):
+                cloud_result = VirusTotalAPI(self.api_keys["virustotal"]).get_report(sha256)
+                threat_source = "VirusTotal"
+            elif selected_engine == 'alienvault' and self.api_keys.get("alienvault"):
+                cloud_result = AlienVaultAPI(self.api_keys["alienvault"]).get_report(sha256)
+                threat_source = "AlienVault OTX"
+            elif selected_engine == 'metadefender' and self.api_keys.get("metadefender"):
+                cloud_result = MetaDefenderAPI(self.api_keys["metadefender"]).get_report(sha256)
+                threat_source = "MetaDefender"
+            elif selected_engine == 'malwarebazaar' and self.api_keys.get("malwarebazaar"):
+                cloud_result = MalwareBazaarAPI(self.api_keys["malwarebazaar"]).get_report(sha256)
+                threat_source = "MalwareBazaar"
+                
+            if cloud_result and selected_engine != 'consensus':
+                self.log_event(f"[*] CLOUD VERDICT ({threat_source}): {cloud_result['verdict']} (Hits: {cloud_result.get('engines_detected', 0)})")
+
+        # 3. Handle the Final Result
+        if cloud_result:
+            verdict = cloud_result['verdict']
+            utils.save_cached_result(sha256, verdict)
+            
+            if verdict == "MALICIOUS":
+                self._prompt_quarantine(file_path, sha256, threat_source, verdict)
+                return
+        else:
+            self.log_event("[-] Cloud APIs skipped or unresponsive. Routing to local ML Engine.")
 
         # --- TIER 2: LOCAL ML ENGINE ---
         if file_size_mb > 50.0:
@@ -140,30 +234,106 @@ class ScannerLogic:
         else:
             self.log_event("[+] File structure aligns with safe parameters.")
 
+    def scan_hash(self, file_hash: str):
+        """Dedicated pipeline for manual hash lookups using the Consensus Engine."""
+        self.log_event("-" * 60)
+        self.log_event(f"[*] Manual Hash Scan: {file_hash}")
+        
+        # 1. Tier 0: Check Local Cache First
+        cached = utils.get_cached_result(file_hash)
+        if cached:
+            self.log_event(f"[*] CACHE HIT: Local DB indicates {cached['verdict']}")
+            return
+
+        # 2. Tier 1: Multi-Cloud Consensus
+        self.log_event("[*] Running Smart Consensus across active APIs...")
+        malicious_sources = []
+
+        # Query 1: MalwareBazaar
+        if self.api_keys.get("malwarebazaar"):
+            mb_res = MalwareBazaarAPI(self.api_keys["malwarebazaar"]).get_report(file_hash)
+            if mb_res:
+                self.log_event(f"    -> MalwareBazaar: {mb_res['verdict']} (Hits: {mb_res.get('engines_detected', 0)})")
+                if mb_res['verdict'] == 'MALICIOUS': malicious_sources.append("MalwareBazaar")
+            else:
+                self.log_event("    -> MalwareBazaar: UNKNOWN (Not found in database)")
+
+        # Query 2: VirusTotal
+        if self.api_keys.get("virustotal"):
+            vt_res = VirusTotalAPI(self.api_keys["virustotal"]).get_report(file_hash)
+            if vt_res:
+                self.log_event(f"    -> VirusTotal: {vt_res['verdict']} (Hits: {vt_res.get('engines_detected', 0)})")
+                if vt_res['verdict'] == 'MALICIOUS': malicious_sources.append("VirusTotal")
+            else:
+                self.log_event("    -> VirusTotal: UNKNOWN (Not found in database)")
+
+        # Query 3: AlienVault OTX
+        if self.api_keys.get("alienvault"):
+            otx_res = AlienVaultAPI(self.api_keys["alienvault"]).get_report(file_hash)
+            if otx_res:
+                self.log_event(f"    -> AlienVault OTX: {otx_res['verdict']} (Hits: {otx_res.get('engines_detected', 0)})")
+                if otx_res['verdict'] == 'MALICIOUS': malicious_sources.append("AlienVault")
+            else:
+                self.log_event("    -> AlienVault OTX: UNKNOWN (Not found in database)")
+
+        # Query 4: MetaDefender
+        if self.api_keys.get("metadefender"):
+            md_res = MetaDefenderAPI(self.api_keys["metadefender"]).get_report(file_hash)
+            if md_res:
+                self.log_event(f"    -> MetaDefender: {md_res['verdict']} (Hits: {md_res.get('engines_detected', 0)})")
+                if md_res['verdict'] == 'MALICIOUS': malicious_sources.append("MetaDefender")
+            else:
+                self.log_event("    -> MetaDefender: UNKNOWN (Not found in database)")
+        # 3. Evaluate Consensus
+        if malicious_sources:
+            final_verdict = "MALICIOUS"
+            self.log_event(f"\n[!] FINAL VERDICT: MALICIOUS (Detected by {', '.join(malicious_sources)})")
+        else:
+            final_verdict = "SAFE"
+            self.log_event("\n[+] FINAL VERDICT: SAFE (All responding engines clean)")
+            
+        # Save to local database for future offline scans
+        utils.save_cached_result(file_hash, final_verdict)
+
     def _handle_critical_ml_threat(self, file_path, sha256, file_size_mb, ml_result):
         """Isolates the complex LLM routing logic for Critical Threats."""
         
-        # HEADLESS FIX: Auto-approve Stage 2 if running in the background
-        if self.headless_mode:
-            ans = 'y'
-        else:
-            ans = input("[?] Execute heavy Stage 2 Family Analysis? (Y/N): ").strip().lower()
-            
         fam_name = "Unknown"
-        if ans == 'y':
+        
+        # --- 1. Prompt for Stage 2 Family Analysis ---
+        if self.headless_mode:
+            fam_ans = 'y'
+        else:
+            fam_ans = input("\n[?] Execute heavy Stage 2 Family Analysis? (Y/N): ").strip().lower()
+            
+        if fam_ans == 'y':
+            self.log_event("[*] Running Stage 2 Classification...")
             fam_result = self.ml_scanner.scan_stage2(ml_result['features'])
             if fam_result:
                 fam_name = fam_result.get('family_name', 'Unknown')
                 self.log_event(f"[*] STAGE 2 CLASSIFICATION: {fam_name}")
-        
-        loading_spinner = Spinner("[*] Generating Qwen AI Threat Report...")
-        loading_spinner.start()
-        report = self.generate_llm_report(fam_name, ml_result['detected_apis'], file_path, ml_result['score'] * 100, sha256, file_size_mb)
-        loading_spinner.stop()
-        
-        self.log_event("\n--- AI Analyst Report ---")
-        self.log_event(report)
-        self._prompt_quarantine(file_path)
+        else:
+            self.log_event("[*] Skipping Family Analysis.")
+            
+        # --- 2. Prompt for AI Analyst Report ---
+        if self.headless_mode:
+            ai_ans = 'y'
+        else:
+            ai_ans = input("\n[?] Generate local AI Analyst Report via Ollama? (Y/N): ").strip().lower()
+            
+        if ai_ans == 'y':
+            loading_spinner = Spinner("[*] Generating Qwen AI Threat Report...")
+            loading_spinner.start()
+            report = self.generate_llm_report(fam_name, ml_result['detected_apis'], file_path, ml_result['score'] * 100, sha256, file_size_mb)
+            loading_spinner.stop()
+            
+            self.log_event("\n--- AI Analyst Report ---")
+            self.log_event(report)
+        else:
+            self.log_event("[*] Skipping AI Analyst Report.")
+            
+        # --- 3. ALWAYS Trigger Quarantine Prompt ---
+        self._prompt_quarantine(file_path, sha256, "Local ML Engine", "CRITICAL RISK")
 
     def _prompt_quarantine(self, file_path, sha256, threat_source, verdict):
         """Centralized prompt for active mitigation and network containment."""
@@ -207,13 +377,20 @@ class ScannerLogic:
         if ans == 'y':
             filename = input("[>] Enter filename (e.g., my_report): ").strip() or "scan_results"
             if not filename.endswith('.txt'): filename += '.txt'
+
+            # Creates Analysis Folder if it doesn't exist yet
+            analysis_dir = "Analysis Files"
+            if not os.path.exists(analysis_dir):
+                os.makedirs(analysis_dir)
+                
+            filepath = os.path.join(analysis_dir, filename)
             
             try:
-                with open(filename, 'w', encoding='utf-8') as f:
+                with open(filepath, 'w', encoding='utf-8') as f:
                     f.write("="*60 + "\n CYBERSENTINEL SCAN REPORT\n")
                     f.write(f" Generated: {datetime.datetime.now()}\n" + "="*60 + "\n")
                     f.write("\n".join(self.session_log))
                     f.write("\n" + "="*60 + "\n END OF REPORT\n" + "="*60 + "\n")
-                print(f"[+] Success! File saved as: {os.path.abspath(filename)}")
+                print(f"[+] Success! File saved as: {os.path.abspath(filepath)}")
             except Exception as e:
                 print(f"[-] Save Error: {e}")
