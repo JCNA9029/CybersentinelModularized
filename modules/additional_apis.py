@@ -64,7 +64,7 @@ class MalwareBazaarAPI:
             url = "https://mb-api.abuse.ch/api/v1/"
             data = {"query": "get_info", "hash": file_hash}
             
-            # Pass the required Auth-Key along with our browser disguise!
+            # Pass the required Auth-Key along with our browser disguise
             headers = {
                 "Auth-Key": self.api_key,
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CyberSentinel/1.0"
