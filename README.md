@@ -20,23 +20,31 @@ To run this framework locally, ensure the following are installed and configured
 ## 🚀 Installation & Setup
 
 **1. Clone the repository**
+
 git clone https://github.com/JCNA9029/CybersentinelModularized.git
+
 cd CybersentinelModularized
 
 **2. Install Core Python Dependencies**
+
 The easiest way to configure your environment is to double-click the included install.bat file. Alternatively, you can install the complete dependency tree manually using: 
+
 pip install -r requirements.txt
 
 **3. Install the Feature Extractor (Thrember)**
+
 To utilize the offline Machine Learning capabilities, install the EMBER2024 `thrember` feature extractor directly from its source repository:
+
 pip install git+https://github.com/FutureComputing4AI/EMBER2024.git
 
 **4. Download the Local Machine Learning Models**
+
 Due to GitHub repository size limitations, the compiled LightGBM models are hosted externally. 
 * Download the EMBER2024 models from [THIS GOOGLE DRIVE LINK](https://drive.google.com/drive/folders/1dtVVH4Oo5RhoAiMPhqsB4T1X2dGX0v5N?usp=drive_link).
 * Place the entire `models/` directory directly into your root `CybersentinelModularized/` folder.
 
 **5. Initialize the AI Analyst**
+
 Install Ollama via the Windows command line, ensure it is running in the background, and pull the required Qwen model:
 winget install -e --id Ollama.Ollama
 ollama run qwen2.5:3b
