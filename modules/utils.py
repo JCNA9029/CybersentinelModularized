@@ -3,6 +3,7 @@ import socket
 import json 
 import os  
 import base64
+import binascii
 import uuid
 import sqlite3  
 import datetime
@@ -39,30 +40,41 @@ def decrypt_key(encrypted_key: str) -> str:
         
         xored = bytes(a ^ b for a, b in zip(enc_bytes, dynamic_key * (len(enc_bytes) // len(dynamic_key) + 1)))
         return xored.decode('utf-8')
-    except Exception:
+    except (binascii.Error, UnicodeDecodeError):
+        # SECURITY FIX: Catch specific cryptographic tampering errors
+        print("[-] Security Warning: Local configuration file was tampered with or corrupted.")
         return ""
 
 def load_config() -> dict:
-    """Reads and decrypts the API key and Webhook URL from the local configuration file."""
-    config_data = {"api_key": "", "webhook_url": ""}
+    """Reads and decrypts multiple API keys and the Webhook URL."""
+    config_data = {"api_keys": {}, "webhook_url": ""}
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r') as f:
                 data = json.load(f)
-                # We now decrypt BOTH parameters!
-                config_data["api_key"] = decrypt_key(data.get("api_key", ""))
+                
+                # Retrieve the dictionary of keys
+                keys = data.get("api_keys", {})
+                
+                # Backward compatibility: migrating your old VT key format automatically
+                if "api_key" in data and not keys:
+                    keys["virustotal"] = data.get("api_key", "")
+                
+                # Decrypt all saved keys
+                config_data["api_keys"] = {k: decrypt_key(v) for k, v in keys.items() if v}
                 config_data["webhook_url"] = decrypt_key(data.get("webhook_url", "")) 
         except Exception:
             pass
     return config_data
 
-def save_config(api_key: str, webhook_url: str = "") -> bool:
-    """Encrypts and writes the configuration to persistent local storage."""
+def save_config(api_keys: dict, webhook_url: str = "") -> bool:
+    """Encrypts a dictionary of API keys and writes to local storage."""
     try:
+        # Encrypt every key in the dictionary before saving
+        encrypted_keys = {k: encrypt_key(v) for k, v in api_keys.items() if v}
         with open(CONFIG_FILE, 'w') as f:
             json.dump({
-                # We now encrypt BOTH parameters!
-                "api_key": encrypt_key(api_key),
+                "api_keys": encrypted_keys,
                 "webhook_url": encrypt_key(webhook_url)
             }, f)
         return True
