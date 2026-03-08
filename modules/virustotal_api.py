@@ -1,5 +1,4 @@
 import requests
-from . import utils
 
 class VirusTotalAPI:
     """Handles all Tier 1 Cloud Intelligence network requests and data parsing."""
@@ -10,43 +9,30 @@ class VirusTotalAPI:
         self.api_key = api_key
         self.headers = {"accept": "application/json", "x-apikey": api_key}
 
-    def query_hash(self, sha256: str) -> dict:
+    def get_report(self, file_hash: str) -> dict:
         """
-        Queries VT and returns the raw JSON response or HTTP error status.
-        Uses the local cache to bypass network latency if possible.
+        Queries VT and returns the standardized dictionary for the Consensus Engine.
         """
-        # Tier 0 Intercept: Check Local DB First
-        cached = utils.get_cached_result(sha256)
-        if cached:
-            return {"status": "CACHED", "verdict": cached['verdict'], "timestamp": cached['timestamp']}
-
+        if not self.api_key: 
+            return None
+            
         try:
-            response = requests.get(self.BASE_URL + sha256, headers=self.headers)
+            # We add a 5-second timeout so the EDR doesn't hang if VT is down
+            response = requests.get(self.BASE_URL + file_hash, headers=self.headers, timeout=5)
             
             if response.status_code == 200:
                 json_data = response.json()
-                verdict = self._determine_verdict(json_data)
+                stats = json_data.get('data', {}).get('attributes', {}).get('last_analysis_stats', {})
+                malicious_count = stats.get('malicious', 0)
                 
-                # Save new cloud intelligence to local cache
-                utils.save_cached_result(sha256, verdict)
-                return {"status": "SUCCESS", "verdict": verdict, "data": json_data}
-                
-            elif response.status_code == 404:
-                return {"status": "UNKNOWN", "message": "[-] File/Hash not found in VirusTotal database."}
-            elif response.status_code == 401:
-                return {"status": "ERROR", "message": "[-] VT API Error 401: Unauthorized. Please check your API Key."}
-            elif response.status_code == 429:
-                return {"status": "ERROR", "message": "[-] VT API Error 429: Rate limit exceeded."}
+                # Threat modeling consensus threshold: 3 or more engines = MALICIOUS
+                return {
+                    "verdict": "MALICIOUS" if malicious_count >= 3 else "SAFE",
+                    "engines_detected": malicious_count
+                }
             else:
-                return {"status": "ERROR", "message": f"[-] VT API Error: {response.status_code}"}
+                # If 404 (Not Found) or 401/429 errors, return None so the Consensus engine can fallback to another API
+                return None
                 
-        except requests.exceptions.RequestException as e:
-            return {"status": "ERROR", "message": f"[-] Network Error: {e}"}
-
-    def _determine_verdict(self, json_data: dict) -> str:
-        """Evaluates AV engine consensus to declare a final boolean state."""
-        stats = json_data.get('data', {}).get('attributes', {}).get('last_analysis_stats', {})
-        malicious_count = stats.get('malicious', 0)
-        
-        # Threat modeling consensus threshold
-        return "MALICIOUS" if malicious_count >= 3 else "SAFE"
+        except requests.exceptions.RequestException:
+            return None
