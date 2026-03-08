@@ -1,11 +1,10 @@
 requests
+psutil
+wmi
+pywin32
 pefile==2024.8.26
 lightgbm
 numpy
 ollama
-thrember
-signify>=0.7.1
-psutil
 watchdog
-wmi
-pywin32
+git+https://github.com/FutureComputing4AI/EMBER2024.git
