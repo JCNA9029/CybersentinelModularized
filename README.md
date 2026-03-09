@@ -82,7 +82,7 @@ To run the daemon with survivability protections, right-click **`TamperGuard.bat
 * `exclusions.txt` - Enterprise allowlist for authorized business applications (auto-generated).
 * `modules/` - Core logic package containing:
   * `analysis_manager.py` - Threat detection routing and pipeline execution.
-  * `additional_apis.py` / `virustotal_api.py` - Tier 1 Cloud Intelligence wrappers.
+  * `scanner_api.py` - Tier 1 Cloud Intelligence wrappers.
   * `daemon_monitor.py` - WMI kernel-bridge and directory watchdog threads.
   * `network_isolation.py` - Automated firewall containment protocols.
   * `ml_engine.py` - Feature extraction and LightGBM model execution.
