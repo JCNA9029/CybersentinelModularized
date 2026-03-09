@@ -2,7 +2,6 @@ requests
 psutil
 wmi
 pywin32
-pefile==2024.8.26
 lightgbm
 numpy
 ollama
