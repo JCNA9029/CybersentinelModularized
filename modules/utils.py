@@ -170,18 +170,23 @@ def save_cached_result(sha256: str, verdict: str, filename: str = "Unknown"):
     except sqlite3.Error:
         pass
 
-def get_cached_result(sha256: str) -> dict:
-    """Executes an O(1) index lookup against the local threat cache."""
+def get_cached_result(sha256):
+    """Pulls historical scan data with full forensic context for SOC analysts."""
     try:
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect("threat_cache.db") as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT verdict, timestamp FROM scan_cache WHERE sha256 = ?', (sha256,))
+            # We explicitly pull the verdict, the filename/source, and the timestamp
+            cursor.execute("SELECT verdict, filename, timestamp FROM scan_cache WHERE sha256 = ?", (sha256,))
             row = cursor.fetchone()
             
             if row:
-                return {"verdict": row[0], "timestamp": row[1]}
-    except sqlite3.Error:
-        pass
+                return {
+                    "verdict": row[0],
+                    "source": row[1],      # Can be a filename, "Manual Hash", or "Fleet Sync"
+                    "timestamp": row[2]
+                }
+    except sqlite3.Error as e:
+        print(f"[-] Cache Read Error: {e}")
     return None
 
 def is_excluded(file_path: str) -> bool:
